@@ -47,12 +47,15 @@ const statusBadgeStyles: Record<CarePlanStatus, string> = {
   '已调整': 'bg-sky-100 text-sky-700 border-sky-200',
 };
 
-const approvalActionStyles: Record<string, { icon: typeof CheckCircle2; color: string; bg: string }> = {
-  '提交': { icon: FileText, color: 'text-slate-600', bg: 'bg-slate-100' },
-  '通过': { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
-  '驳回': { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100' },
-  '调整': { icon: RefreshCw, color: 'text-sky-600', bg: 'bg-sky-100' },
-};
+function getActionStyle(action: string): { icon: typeof CheckCircle2; color: string; bg: string } {
+  const styles: Record<string, { icon: typeof CheckCircle2; color: string; bg: string }> = {
+    '提交': { icon: FileText, color: 'text-slate-600', bg: 'bg-slate-100' },
+    '通过': { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
+    '驳回': { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100' },
+    '调整': { icon: RefreshCw, color: 'text-sky-600', bg: 'bg-sky-100' },
+  };
+  return styles[action] || { icon: RefreshCw, color: 'text-sky-600', bg: 'bg-sky-100' };
+}
 
 const categoryIcons: Record<CareTask['category'], { icon: typeof Heart; bg: string; text: string }> = {
   '母亲护理': { icon: Heart, bg: 'bg-rose-100', text: 'text-rose-600' },
@@ -388,6 +391,20 @@ export default function CarePlans() {
     const mm = date.getMinutes().toString().padStart(2, '0');
     const ss = date.getSeconds().toString().padStart(2, '0');
     return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+  };
+
+  const formatTimeToMinute = (timeStr: string): string => {
+    return timeStr.slice(0, 16);
+  };
+
+  const parseComment = (comment: string): { taskName?: string; reason: string } => {
+    const match = comment.match(/【任务：(.+?)】/);
+    if (match) {
+      const taskName = match[1];
+      const reason = comment.replace(match[0], '').trim();
+      return { taskName, reason };
+    }
+    return { reason: comment };
   };
 
   const handleApprovalAction = (action: '通过' | '驳回' | '调整') => {
@@ -848,44 +865,68 @@ export default function CarePlans() {
                         <Clock className="w-4 h-4 text-slate-400" />
                         审批历史时间轴
                       </h4>
-                      <div className="relative ml-3">
-                        <div className="absolute left-2 top-1 bottom-1 w-0.5 bg-gradient-to-b from-pink-300 via-slate-200 to-emerald-300" />
-                        {selectedPlan.approvalHistory.map((record, idx) => {
-                          const style = approvalActionStyles[record.action];
-                          const ActIcon = style.icon;
-                          const isLast = idx === selectedPlan.approvalHistory.length - 1;
-                          return (
-                            <div key={record.id} className="relative pl-10 pb-5 last:pb-0">
-                              <div className={cn(
-                                'absolute left-0 w-5 h-5 rounded-full flex items-center justify-center ring-4 ring-white',
-                                style.bg,
-                                isLast && 'ring-pink-100 scale-110'
-                              )}>
-                                <ActIcon className={cn('w-3 h-3', style.color)} />
-                              </div>
-                              <div className={cn(
-                                'rounded-xl p-4 transition-all',
-                                isLast ? 'bg-gradient-to-br from-pink-50/80 to-white border border-pink-100' : 'bg-slate-50 border border-slate-100'
-                              )}>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className={cn('text-xs font-bold px-2 py-0.5 rounded-md', style.bg, style.color)}>
-                                      {record.action}
-                                    </span>
-                                    <span className="text-sm font-medium text-slate-700">{record.operatorName}</span>
-                                  </div>
-                                  <span className="text-xs text-slate-400">{record.operateTime}</span>
+                      {(!selectedPlan.approvalHistory || selectedPlan.approvalHistory.length === 0) ? (
+                        <div className="py-12 text-center text-slate-400">
+                          <FileText className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                          <div className="text-sm">暂无审批记录</div>
+                        </div>
+                      ) : (
+                        <div className="relative ml-3">
+                          <div className="absolute left-2 top-1 bottom-1 w-0.5 bg-gradient-to-b from-pink-300 via-slate-200 to-emerald-300" />
+                          {selectedPlan.approvalHistory.map((record, idx) => {
+                            const style = getActionStyle(record.action);
+                            const ActIcon = style.icon;
+                            const isLast = idx === selectedPlan.approvalHistory!.length - 1;
+                            const parsedComment = record.comment ? parseComment(record.comment) : null;
+                            const isNurse = record.operatorName === '护理师';
+                            return (
+                              <div key={record.id} className="relative pl-10 pb-5 last:pb-0">
+                                <div className={cn(
+                                  'absolute left-0 w-5 h-5 rounded-full flex items-center justify-center ring-4 ring-white',
+                                  style.bg,
+                                  isLast && 'ring-pink-100 scale-110'
+                                )}>
+                                  <ActIcon className={cn('w-3 h-3', style.color)} />
                                 </div>
-                                {record.comment && (
-                                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-                                    {record.comment}
-                                  </p>
-                                )}
+                                <div className={cn(
+                                  'rounded-xl p-4 transition-all',
+                                  isLast ? 'bg-gradient-to-br from-pink-50/80 to-white border border-pink-100' : 'bg-slate-50 border border-slate-100'
+                                )}>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className={cn('text-xs font-bold px-2 py-0.5 rounded-md', style.bg, style.color)}>
+                                        {record.action}
+                                      </span>
+                                      <span className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                                        {isNurse && <Stethoscope className="w-3.5 h-3.5 text-pink-500" />}
+                                        {record.operatorName}
+                                      </span>
+                                    </div>
+                                    <span className="text-xs text-slate-400">{formatTimeToMinute(record.operateTime)}</span>
+                                  </div>
+                                  {parsedComment && (
+                                    <div className="mt-2">
+                                      {parsedComment.taskName && (
+                                        <div className="mb-2">
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium">
+                                            <ClipboardList className="w-3 h-3" />
+                                            任务：{parsedComment.taskName}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {parsedComment.reason && (
+                                        <p className="text-sm text-slate-600 leading-relaxed">
+                                          {parsedComment.reason}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

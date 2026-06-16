@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search,
   Filter,
@@ -26,7 +26,9 @@ import type { CareTask, TaskStatus, Nurse, TaskPriority } from '@/types';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
+type ViewMode = 'all' | 'my';
 type KanbanStatus = '待执行' | '进行中' | '已完成';
+type SubStatusTab = '全部' | '待执行' | '进行中' | '调整中';
 type NurseFilter = string | '全部';
 type TaskTypeFilter = CareTask['category'] | '全部';
 
@@ -57,6 +59,13 @@ const priorityStyles: Record<TaskPriority, string> = {
   '低': 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
+const subStatusTabs: { key: SubStatusTab; label: string }[] = [
+  { key: '全部', label: '全部' },
+  { key: '待执行', label: '待执行' },
+  { key: '进行中', label: '进行中' },
+  { key: '调整中', label: '调整中' },
+];
+
 function formatDateTime(date: Date): string {
   const y = date.getFullYear();
   const m = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -65,6 +74,14 @@ function formatDateTime(date: Date): string {
   const mm = date.getMinutes().toString().padStart(2, '0');
   const ss = date.getSeconds().toString().padStart(2, '0');
   return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+}
+
+function getTodayString(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = (now.getMonth() + 1).toString().padStart(2, '0');
+  const d = now.getDate().toString().padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function Avatar({ name, size = 'sm' }: { name: string; size?: 'sm' | 'md' }) {
@@ -95,6 +112,7 @@ function TaskCard({
   getNurse,
   onAccept,
   onApplyAdjust,
+  viewMode,
 }: {
   task: CareTask;
   onDragStart: (id: string) => void;
@@ -105,20 +123,35 @@ function TaskCard({
   getNurse: (id?: string) => Nurse | undefined;
   onAccept: (task: CareTask) => void;
   onApplyAdjust: (task: CareTask) => void;
+  viewMode: ViewMode;
 }) {
   const nurse = getNurse(task.assigneeId);
   const catStyle = categoryIcons[task.category];
   const CatIcon = catStyle.icon;
   const isOverdue = task.isOverdue || task.status === '已超时';
+  const isAdjusting = task.status === '调整中';
   const showActionButtons = task.status === '待执行' && !!task.assigneeId;
 
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const cardDraggable = viewMode === 'all';
+
   return (
     <div
-      draggable
+      draggable={cardDraggable}
       onDragStart={e => {
+        if (!cardDraggable) return;
         e.dataTransfer.effectAllowed = 'move';
         onDragStart(task.id);
       }}
@@ -128,15 +161,21 @@ function TaskCard({
         onDragOver();
       }}
       className={cn(
-        'group relative bg-white rounded-xl p-4 shadow-sm border transition-all duration-200 cursor-grab active:cursor-grabbing',
+        'group relative bg-white rounded-xl p-4 shadow-sm border transition-all duration-200',
+        cardDraggable ? 'cursor-grab active:cursor-grabbing' : '',
         isDragging ? 'opacity-40 scale-95 rotate-1' : 'hover:shadow-md hover:-translate-y-0.5',
         isOverdue
           ? 'border-red-300 ring-1 ring-red-200/50 shadow-red-50/50'
+          : isAdjusting
+          ? 'border-orange-300 ring-1 ring-orange-200/50'
           : 'border-slate-200 hover:border-slate-300'
       )}
     >
       {isOverdue && (
         <div className="absolute -left-px top-4 bottom-4 w-1 bg-red-400 rounded-r" />
+      )}
+      {isAdjusting && (
+        <div className="absolute -left-px top-4 bottom-4 w-1 bg-orange-400 rounded-r" />
       )}
 
       <div className="flex items-start justify-between gap-2">
@@ -150,7 +189,9 @@ function TaskCard({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <GripVertical className="w-4 h-4 text-slate-300 group-hover:text-slate-400 transition-colors" />
+          {cardDraggable && (
+            <GripVertical className="w-4 h-4 text-slate-300 group-hover:text-slate-400 transition-colors" />
+          )}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setShowMenu(!showMenu)}
@@ -194,11 +235,17 @@ function TaskCard({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {isOverdue && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-50 text-red-600 text-[10px] font-medium">
               <AlertTriangle className="w-3 h-3" />
               超时
+            </span>
+          )}
+          {isAdjusting && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-orange-50 text-orange-600 text-[10px] font-medium border border-orange-200">
+              <AlertCircle className="w-3 h-3" />
+              调整中
             </span>
           )}
           <span className={cn(
@@ -247,39 +294,79 @@ function TaskCard({
 
 export default function Tasks() {
   const { careTasks: tasks, nurses, carePlans, updateCareTask, updateCarePlan } = useAppStore();
+
+  // 视角模式：全部任务 / 我的任务
+  const [viewMode, setViewMode] = useState<ViewMode>('all');
+  // 我的任务 - 护理师选择（当前登录护理师模拟）
+  // 注释：当前"护理师选择"仅做前端展示模拟，后续接登录后取当前用户
+  const [selectedNurseId, setSelectedNurseId] = useState<string>('');
+  // 我的任务 - 状态子Tab
+  const [subStatusTab, setSubStatusTab] = useState<SubStatusTab>('全部');
+
+  // 全部任务视角下的筛选器
   const [searchQuery, setSearchQuery] = useState('');
   const [nurseFilter, setNurseFilter] = useState<NurseFilter>('全部');
   const [taskTypeFilter, setTaskTypeFilter] = useState<TaskTypeFilter>('全部');
   const [dateFilter, setDateFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | '全部'>('全部');
+
   const [drag, setDrag] = useState<DragState>({ taskId: null, fromColumn: null, overColumn: null });
   const [adjustTask, setAdjustTask] = useState<CareTask | null>(null);
+
+  // 初始化默认护理师为第一个
+  useEffect(() => {
+    if (nurses.length > 0 && !selectedNurseId) {
+      setSelectedNurseId(nurses[0].id);
+    }
+  }, [nurses, selectedNurseId]);
 
   const getNurse = (id?: string) => nurses.find(n => n.id === id);
 
   const getColumnStatus = (taskStatus: TaskStatus): KanbanStatus => {
     if (taskStatus === '已完成') return '已完成';
     if (taskStatus === '进行中') return '进行中';
+    // 调整中任务仍放在待执行列
     return '待执行';
   };
 
   const filteredTasks = useMemo(() => {
-    return tasks.filter(t => {
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        if (
-          !t.taskName.toLowerCase().includes(q) &&
-          !t.customerName.toLowerCase().includes(q) &&
-          !t.description.toLowerCase().includes(q)
-        ) return false;
-      }
-      if (nurseFilter !== '全部' && t.assigneeId !== nurseFilter) return false;
-      if (taskTypeFilter !== '全部' && t.category !== taskTypeFilter) return false;
-      if (priorityFilter !== '全部' && t.priority !== priorityFilter) return false;
-      if (dateFilter && t.scheduledTime.slice(0, 10) !== dateFilter) return false;
-      return true;
-    });
-  }, [tasks, searchQuery, nurseFilter, taskTypeFilter, dateFilter, priorityFilter]);
+    const todayStr = getTodayString();
+
+    if (viewMode === 'my') {
+      // 我的任务视角：内置筛选逻辑
+      return tasks.filter(t => {
+        // 1. scheduledDate 等于今天
+        const taskDate = t.scheduledTime.slice(0, 10);
+        if (taskDate !== todayStr) return false;
+        // 2. assigneeId === 所选护理师
+        if (t.assigneeId !== selectedNurseId) return false;
+        // 3. 状态子Tab筛选
+        if (subStatusTab !== '全部') {
+          if (subStatusTab === '待执行' && t.status !== '待执行') return false;
+          if (subStatusTab === '进行中' && t.status !== '进行中') return false;
+          if (subStatusTab === '调整中' && t.status !== '调整中') return false;
+        }
+        return true;
+      });
+    } else {
+      // 全部任务视角：原有筛选逻辑
+      return tasks.filter(t => {
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          if (
+            !t.taskName.toLowerCase().includes(q) &&
+            !t.customerName.toLowerCase().includes(q) &&
+            !t.description.toLowerCase().includes(q)
+          ) return false;
+        }
+        if (nurseFilter !== '全部' && t.assigneeId !== nurseFilter) return false;
+        if (taskTypeFilter !== '全部' && t.category !== taskTypeFilter) return false;
+        if (priorityFilter !== '全部' && t.priority !== priorityFilter) return false;
+        if (dateFilter && t.scheduledTime.slice(0, 10) !== dateFilter) return false;
+        return true;
+      });
+    }
+  }, [tasks, viewMode, selectedNurseId, subStatusTab, searchQuery, nurseFilter, taskTypeFilter, dateFilter, priorityFilter]);
 
   const tasksByColumn = useMemo(() => {
     const grouped: Record<KanbanStatus, CareTask[]> = {
@@ -293,13 +380,14 @@ export default function Tasks() {
     return grouped;
   }, [filteredTasks]);
 
+  // 统计：当前显示列表的数字
   const stats = useMemo(() => {
-    const total = tasks.length;
-    const overdue = tasks.filter(t => t.isOverdue || t.status === '已超时').length;
-    const completed = tasks.filter(t => t.status === '已完成').length;
-    const inProgress = tasks.filter(t => t.status === '进行中').length;
+    const total = filteredTasks.length;
+    const overdue = filteredTasks.filter(t => t.isOverdue || t.status === '已超时').length;
+    const completed = filteredTasks.filter(t => t.status === '已完成').length;
+    const inProgress = filteredTasks.filter(t => t.status === '进行中').length;
     return { total, overdue, completed, inProgress, rate: total > 0 ? Math.round((completed / total) * 100) : 0 };
-  }, [tasks]);
+  }, [filteredTasks]);
 
   const handleDragStart = (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
@@ -385,8 +473,11 @@ export default function Tasks() {
     setPriorityFilter('全部');
   };
 
+  const isAllView = viewMode === 'all';
+
   return (
     <div className="h-full flex flex-col bg-slate-50">
+      {/* 顶部标题 + 统计指标 */}
       <div className="px-6 py-4 bg-white border-b border-slate-200 shrink-0">
         <div className="flex items-center justify-between">
           <div>
@@ -420,126 +511,222 @@ export default function Tasks() {
         </div>
       </div>
 
-      <div className="px-6 py-3 bg-white border-b border-slate-100 shrink-0">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-            <Filter className="w-4 h-4 text-sky-500" />
-            筛选
-          </div>
-
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="搜索任务/客户"
-              className="w-56 pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-            />
-          </div>
-
-          <div className="relative">
-            <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <select
-              value={nurseFilter}
-              onChange={e => setNurseFilter(e.target.value)}
-              className="w-40 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+      {/* 视角切换 Tab */}
+      <div className="px-6 pt-3 bg-white border-b border-slate-100 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1">
+            <button
+              onClick={() => setViewMode('all')}
+              className={cn(
+                'px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                isAllView
+                  ? 'bg-white text-sky-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
             >
-              <option value="全部">全部护理师</option>
-              {nurses.map(n => (
-                <option key={n.id} value={n.id}>{n.name} · {n.nurseLevel}</option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-          </div>
-
-          <div className="relative">
-            <ListTodo className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <select
-              value={taskTypeFilter}
-              onChange={e => setTaskTypeFilter(e.target.value as TaskTypeFilter)}
-              className="w-36 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+              全部任务
+            </button>
+            <button
+              onClick={() => setViewMode('my')}
+              className={cn(
+                'px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                !isAllView
+                  ? 'bg-white text-sky-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
             >
-              <option value="全部">全部类型</option>
-              {(['母亲护理', '新生儿护理', '母婴同室', '健康监测', '心理疏导', '其他'] as const).map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              我的任务
+            </button>
           </div>
 
-          <div className="relative">
-            <Clock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <select
-              value={priorityFilter}
-              onChange={e => setPriorityFilter(e.target.value as TaskPriority | '全部')}
-              className="w-28 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+          {/* 我的任务视角 - 护理师选择 + 状态子Tab */}
+          {!isAllView && (
+            <div className="flex items-center gap-4">
+              {/* 护理师选择下拉 */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-500">当前护理师：</span>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    value={selectedNurseId}
+                    onChange={e => setSelectedNurseId(e.target.value)}
+                    className="w-44 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+                  >
+                    {nurses.map(n => (
+                      <option key={n.id} value={n.id}>{n.name} · {n.nurseLevel}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* 状态子Tab */}
+              <div className="flex items-center gap-1 bg-slate-50 rounded-xl p-1 border border-slate-200">
+                {subStatusTabs.map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setSubStatusTab(tab.key)}
+                    className={cn(
+                      'px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200',
+                      subStatusTab === tab.key
+                        ? 'bg-white text-slate-700 shadow-sm border border-slate-200'
+                        : 'text-slate-500 hover:text-slate-700'
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 全部任务视角下的筛选器 */}
+      {isAllView && (
+        <div className="px-6 py-3 bg-white border-b border-slate-100 shrink-0">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <Filter className="w-4 h-4 text-sky-500" />
+              筛选
+            </div>
+
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="搜索任务/客户"
+                className="w-56 pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+              />
+            </div>
+
+            <div className="relative">
+              <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <select
+                value={nurseFilter}
+                onChange={e => setNurseFilter(e.target.value)}
+                className="w-40 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+              >
+                <option value="全部">全部护理师</option>
+                {nurses.map(n => (
+                  <option key={n.id} value={n.id}>{n.name} · {n.nurseLevel}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <ListTodo className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <select
+                value={taskTypeFilter}
+                onChange={e => setTaskTypeFilter(e.target.value as TaskTypeFilter)}
+                className="w-36 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+              >
+                <option value="全部">全部类型</option>
+                {(['母亲护理', '新生儿护理', '母婴同室', '健康监测', '心理疏导', '其他'] as const).map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <Clock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <select
+                value={priorityFilter}
+                onChange={e => setPriorityFilter(e.target.value as TaskPriority | '全部')}
+                className="w-28 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
+              >
+                <option value="全部">全部优先级</option>
+                <option value="高">高优先级</option>
+                <option value="中">中优先级</option>
+                <option value="低">低优先级</option>
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <Calendar className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={e => setDateFilter(e.target.value)}
+                className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+              />
+            </div>
+
+            <button
+              onClick={resetFilters}
+              className="px-4 py-2 text-sm text-slate-500 hover:text-sky-500 hover:bg-sky-50 rounded-lg transition-colors flex items-center gap-1.5"
             >
-              <option value="全部">全部优先级</option>
-              <option value="高">高优先级</option>
-              <option value="中">中优先级</option>
-              <option value="低">低优先级</option>
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <X className="w-3.5 h-3.5" />
+              重置
+            </button>
+
+            <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded border-2 border-red-300 bg-red-50" /> 超时任务
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded border-2 border-orange-300 bg-orange-50" /> 调整中
+              </span>
+              <span className="flex items-center gap-1.5">
+                <GripVertical className="w-4 h-4" /> 拖拽移动
+              </span>
+            </div>
           </div>
+        </div>
+      )}
 
-          <div className="relative">
-            <Calendar className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="date"
-              value={dateFilter}
-              onChange={e => setDateFilter(e.target.value)}
-              className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
-            />
-          </div>
-
-          <button
-            onClick={resetFilters}
-            className="px-4 py-2 text-sm text-slate-500 hover:text-sky-500 hover:bg-sky-50 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            <X className="w-3.5 h-3.5" />
-            重置
-          </button>
-
-          <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+      {/* 我的任务视角 - 无筛选器，仅显示图例 */}
+      {!isAllView && (
+        <div className="px-6 py-2 bg-white border-b border-slate-100 shrink-0">
+          <div className="flex items-center justify-end gap-2 text-xs text-slate-500">
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded border-2 border-red-300 bg-red-50" /> 超时任务
             </span>
             <span className="flex items-center gap-1.5">
-              <GripVertical className="w-4 h-4" /> 拖拽移动
+              <span className="w-3 h-3 rounded border-2 border-orange-300 bg-orange-50" /> 调整中
             </span>
           </div>
         </div>
-      </div>
+      )}
 
+      {/* Kanban 看板区域 */}
       <div className="flex-1 overflow-hidden p-6">
         <div className="h-full grid grid-cols-3 gap-5">
           {kanbanColumns.map(col => {
             const colTasks = tasksByColumn[col.status];
             const ColIcon = col.icon;
             const isDropTarget = drag.overColumn === col.status;
+            const allowDrop = isAllView;
 
             return (
               <div
                 key={col.status}
                 onDragOver={e => {
+                  if (!allowDrop) return;
                   e.preventDefault();
                   if (drag.taskId && drag.overColumn !== col.status) {
                     setDrag(prev => ({ ...prev, overColumn: col.status }));
                   }
                 }}
                 onDragLeave={e => {
+                  if (!allowDrop) return;
                   if (!e.currentTarget.contains(e.relatedTarget as Node) && drag.overColumn === col.status) {
                     setDrag(prev => ({ ...prev, overColumn: null }));
                   }
                 }}
                 onDrop={e => {
+                  if (!allowDrop) return;
                   e.preventDefault();
                   handleDragEnd();
                 }}
                 className={cn(
                   'flex flex-col rounded-2xl transition-all duration-200 overflow-hidden',
-                  isDropTarget
+                  allowDrop && isDropTarget
                     ? 'bg-sky-50/50 ring-2 ring-sky-300 ring-dashed'
                     : 'bg-slate-100/60'
                 )}
@@ -577,12 +764,13 @@ export default function Tasks() {
                       getNurse={getNurse}
                       onAccept={handleAcceptTask}
                       onApplyAdjust={(t) => setAdjustTask(t)}
+                      viewMode={viewMode}
                     />
                   ))}
 
                   {colTasks.length === 0 && (
                     <div className="h-32 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl mx-1">
-                      {isDropTarget ? (
+                      {allowDrop && isDropTarget ? (
                         <>
                           <CheckCircle2 className="w-6 h-6 text-sky-400 mb-1" />
                           <span className="text-xs text-sky-500 font-medium">松开放置</span>
@@ -597,7 +785,7 @@ export default function Tasks() {
                   )}
                 </div>
 
-                {col.status === '待执行' && (
+                {col.status === '待执行' && isAllView && (
                   <div className="p-3 pt-0 shrink-0">
                     <button className="w-full py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 text-sm font-medium hover:border-sky-400 hover:text-sky-500 hover:bg-white/50 transition-colors flex items-center justify-center gap-1.5">
                       <ListTodo className="w-4 h-4" />
@@ -610,6 +798,8 @@ export default function Tasks() {
           })}
         </div>
       </div>
+
+      {/* 调整任务弹窗 */}
       {adjustTask && (
         <AdjustTaskDialog
           task={adjustTask}

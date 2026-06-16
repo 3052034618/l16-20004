@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Users, CalendarCheck, Package, ClipboardList, Bell, LineChart as LineChartIcon,
   BedDouble, Sparkles, AlertTriangle, CheckCircle, Info, AlertCircle,
@@ -9,10 +9,11 @@ import {
   ResponsiveContainer, Legend
 } from 'recharts';
 import type { JSX } from 'react';
+import { useAppStore } from '../store';
 
 type RoomStatus = 'idle' | 'occupied' | 'cleaning' | 'maintenance';
 
-interface Room {
+interface FloorRoom {
   id: string;
   roomNumber: string;
   x: number;
@@ -32,7 +33,7 @@ interface NurseHeatPoint {
 
 interface FloorData {
   floor: number;
-  rooms: Room[];
+  rooms: FloorRoom[];
   nursePoints: NurseHeatPoint[];
 }
 
@@ -84,166 +85,7 @@ const notificationConfig: Record<NotificationType, {
   care: { icon: Heart, bg: 'bg-pink-50', text: 'text-pink-600', border: 'border-pink-200' },
 };
 
-const floorLayout: Record<number, FloorData> = {
-  3: {
-    floor: 3,
-    rooms: [
-      { id: '301', roomNumber: '301', x: 20, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '302', roomNumber: '302', x: 125, y: 20, width: 90, height: 60, status: 'idle' },
-      { id: '303', roomNumber: '303', x: 230, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '304', roomNumber: '304', x: 335, y: 20, width: 90, height: 60, status: 'cleaning' },
-      { id: '305', roomNumber: '305', x: 440, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '306', roomNumber: '306', x: 545, y: 20, width: 90, height: 60, status: 'idle' },
-      { id: '307', roomNumber: '307', x: 20, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '308', roomNumber: '308', x: 125, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '309', roomNumber: '309', x: 230, y: 100, width: 90, height: 60, status: 'maintenance' },
-      { id: '310', roomNumber: '310', x: 335, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '311', roomNumber: '311', x: 440, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '312', roomNumber: '312', x: 545, y: 100, width: 90, height: 60, status: 'cleaning' },
-    ],
-    nursePoints: [
-      { id: 'n1', name: '李护士', x: 70, y: 50, intensity: 3 },
-      { id: 'n2', name: '王护士', x: 280, y: 130, intensity: 2 },
-      { id: 'n3', name: '张护士', x: 490, y: 50, intensity: 1 },
-    ],
-  },
-  4: {
-    floor: 4,
-    rooms: [
-      { id: '401', roomNumber: '401', x: 20, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '402', roomNumber: '402', x: 125, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '403', roomNumber: '403', x: 230, y: 20, width: 90, height: 60, status: 'idle' },
-      { id: '404', roomNumber: '404', x: 335, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '405', roomNumber: '405', x: 440, y: 20, width: 90, height: 60, status: 'cleaning' },
-      { id: '406', roomNumber: '406', x: 545, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '407', roomNumber: '407', x: 20, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '408', roomNumber: '408', x: 125, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '409', roomNumber: '409', x: 230, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '410', roomNumber: '410', x: 335, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '411', roomNumber: '411', x: 440, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '412', roomNumber: '412', x: 545, y: 100, width: 90, height: 60, status: 'maintenance' },
-    ],
-    nursePoints: [
-      { id: 'n1', name: '赵护士', x: 170, y: 50, intensity: 2 },
-      { id: 'n2', name: '钱护士', x: 380, y: 130, intensity: 3 },
-      { id: 'n3', name: '孙护士', x: 590, y: 50, intensity: 1 },
-    ],
-  },
-  5: {
-    floor: 5,
-    rooms: [
-      { id: '501', roomNumber: '501', x: 20, y: 20, width: 90, height: 60, status: 'idle' },
-      { id: '502', roomNumber: '502', x: 125, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '503', roomNumber: '503', x: 230, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '504', roomNumber: '504', x: 335, y: 20, width: 90, height: 60, status: 'cleaning' },
-      { id: '505', roomNumber: '505', x: 440, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '506', roomNumber: '506', x: 545, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '507', roomNumber: '507', x: 20, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '508', roomNumber: '508', x: 125, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '509', roomNumber: '509', x: 230, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '510', roomNumber: '510', x: 335, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '511', roomNumber: '511', x: 440, y: 100, width: 90, height: 60, status: 'maintenance' },
-      { id: '512', roomNumber: '512', x: 545, y: 100, width: 90, height: 60, status: 'idle' },
-    ],
-    nursePoints: [
-      { id: 'n1', name: '周护士', x: 70, y: 130, intensity: 3 },
-      { id: 'n2', name: '吴护士', x: 330, y: 50, intensity: 2 },
-      { id: 'n3', name: '郑护士', x: 490, y: 130, intensity: 2 },
-    ],
-  },
-  6: {
-    floor: 6,
-    rooms: [
-      { id: '601', roomNumber: '601', x: 20, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '602', roomNumber: '602', x: 125, y: 20, width: 90, height: 60, status: 'idle' },
-      { id: '603', roomNumber: '603', x: 230, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '604', roomNumber: '604', x: 335, y: 20, width: 90, height: 60, status: 'occupied' },
-      { id: '605', roomNumber: '605', x: 440, y: 20, width: 90, height: 60, status: 'idle' },
-      { id: '606', roomNumber: '606', x: 545, y: 20, width: 90, height: 60, status: 'cleaning' },
-      { id: '607', roomNumber: '607', x: 20, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '608', roomNumber: '608', x: 125, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '609', roomNumber: '609', x: 230, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '610', roomNumber: '610', x: 335, y: 100, width: 90, height: 60, status: 'idle' },
-      { id: '611', roomNumber: '611', x: 440, y: 100, width: 90, height: 60, status: 'occupied' },
-      { id: '612', roomNumber: '612', x: 545, y: 100, width: 90, height: 60, status: 'occupied' },
-    ],
-    nursePoints: [
-      { id: 'n1', name: '冯护士', x: 275, y: 50, intensity: 1 },
-      { id: 'n2', name: '陈护士', x: 380, y: 130, intensity: 3 },
-      { id: 'n3', name: '褚护士', x: 170, y: 130, intensity: 2 },
-    ],
-  },
-};
-
-const kpiCards: KpiCard[] = [
-  {
-    title: '入住率',
-    value: 82,
-    unit: '%',
-    trend: 3.2,
-    icon: BedDouble,
-    gradient: 'from-primary-500 to-rose-400',
-    iconBg: 'bg-white/20',
-  },
-  {
-    title: '在住客户',
-    value: 98,
-    unit: '人',
-    trend: 5,
-    icon: Users,
-    gradient: 'from-accent-500 to-cyan-400',
-    iconBg: 'bg-white/20',
-  },
-  {
-    title: '今日任务数',
-    value: 156,
-    unit: '项',
-    trend: -2,
-    icon: CalendarCheck,
-    gradient: 'from-amber-500 to-orange-400',
-    iconBg: 'bg-white/20',
-  },
-  {
-    title: '完成率',
-    value: 91,
-    unit: '%',
-    trend: 4.5,
-    icon: ClipboardList,
-    gradient: 'from-emerald-500 to-green-400',
-    iconBg: 'bg-white/20',
-  },
-  {
-    title: '库存预警',
-    value: 12,
-    unit: '项',
-    trend: -1,
-    icon: Package,
-    gradient: 'from-violet-500 to-purple-400',
-    iconBg: 'bg-white/20',
-  },
-  {
-    title: '待审批方案',
-    value: 8,
-    unit: '个',
-    trend: 2,
-    icon: Sparkles,
-    gradient: 'from-pink-500 to-fuchsia-400',
-    iconBg: 'bg-white/20',
-  },
-];
-
-const notifications: Notification[] = [
-  { id: '1', type: 'danger', title: '紧急医疗呼叫', message: '305房间产妇请求紧急医疗协助', time: '2分钟前', target: '/customers/305' },
-  { id: '2', type: 'warning', title: '库存不足预警', message: '婴儿纸尿裤库存低于安全阈值（剩余 5 包）', time: '15分钟前', target: '/inventory' },
-  { id: '3', type: 'care', title: '新生儿护理提醒', message: '402房间宝宝已到疫苗接种时间', time: '30分钟前', target: '/schedules' },
-  { id: '4', type: 'success', title: '护理方案已通过', message: '客户张晓梅护理方案审批通过', time: '1小时前', target: '/care-plans/102' },
-  { id: '5', type: 'info', title: '新客户入住', message: '508房间客户王丽今日入住', time: '2小时前', target: '/rooms/508' },
-  { id: '6', type: 'warning', title: '设备维护提醒', message: '6楼紫外线消毒灯需要定期维护', time: '3小时前', target: '/equipment' },
-  { id: '7', type: 'danger', title: '房间异常警报', message: '309房间烟雾传感器触发警报（已确认误报）', time: '4小时前', target: '/rooms/309' },
-  { id: '8', type: 'care', title: '产后康复提醒', message: '411房间产妇今日需进行盆底康复训练', time: '5小时前', target: '/schedules' },
-  { id: '9', type: 'info', title: '员工换班通知', message: '夜班护理人员已到岗交接', time: '6小时前', target: '/staff' },
-  { id: '10', type: 'success', title: '满意度调查完成', message: '本月客户满意度调研已收集完成，综合评分 4.8/5.0', time: '8小时前', target: '/reports' },
-];
+const nurseNames = ['李护士', '王护士', '张护士', '赵护士', '钱护士', '孙护士', '周护士', '吴护士', '郑护士', '冯护士', '陈护士', '褚护士'];
 
 const chartData = [
   { date: '6/10', 入住率: 75, 满意度: 88, 新入住: 12 },
@@ -254,6 +96,86 @@ const chartData = [
   { date: '6/15', 入住率: 85, 满意度: 91, 新入住: 22 },
   { date: '6/16', 入住率: 82, 满意度: 93, 新入住: 16 },
 ];
+
+function mapStatusToRoomStatus(status: string): RoomStatus {
+  switch (status) {
+    case '已入住': return 'occupied';
+    case '空闲': return 'idle';
+    case '清洁中': return 'cleaning';
+    case '维修中': return 'maintenance';
+    default: return 'idle';
+  }
+}
+
+function generateFloorLayout(rooms: any[]): Record<number, FloorData> {
+  const floorRoomsMap: Record<number, any[]> = {};
+  const floors = [3, 4, 5, 6];
+
+  floors.forEach(floor => {
+    floorRoomsMap[floor] = [];
+  });
+
+  rooms.forEach(room => {
+    const floor = parseInt(room.roomNumber.slice(0, 1));
+    if (floorRoomsMap[floor]) {
+      floorRoomsMap[floor].push(room);
+    }
+  });
+
+  const layout: Record<number, FloorData> = {};
+
+  floors.forEach(floor => {
+    const floorRooms = floorRoomsMap[floor]
+      .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber));
+
+    const gridRooms: FloorRoom[] = floorRooms.map((room, idx) => {
+      const col = idx % 6;
+      const row = Math.floor(idx / 6);
+      const x = 20 + col * 105;
+      const y = 20 + row * 80;
+      return {
+        id: room.id,
+        roomNumber: room.roomNumber,
+        x,
+        y,
+        width: 90,
+        height: 60,
+        status: mapStatusToRoomStatus(room.status),
+      };
+    });
+
+    const nurseCount = 3;
+    const seed = floor * 3;
+    const nursePoints: NurseHeatPoint[] = Array.from({ length: nurseCount }, (_, i) => ({
+      id: `n${floor}-${i}`,
+      name: nurseNames[(seed + i) % nurseNames.length],
+      x: 70 + i * 210 + (floor % 2) * 50,
+      y: i % 2 === 0 ? 50 : 130,
+      intensity: (i + floor) % 3 + 1,
+    }));
+
+    layout[floor] = {
+      floor,
+      rooms: gridRooms,
+      nursePoints,
+    };
+  });
+
+  return layout;
+}
+
+function timeAgo(dateStr: string): string {
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diff = Math.max(0, now.getTime() - date.getTime());
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return '刚刚';
+  if (mins < 60) return `${mins}分钟前`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}小时前`;
+  const days = Math.floor(hours / 24);
+  return `${days}天前`;
+}
 
 function KpiCardComponent({ card, delay }: { card: KpiCard; delay: number }): JSX.Element {
   const Icon = card.icon;
@@ -295,6 +217,9 @@ function KpiCardComponent({ card, delay }: { card: KpiCard; delay: number }): JS
 function FloorHeatMap(): JSX.Element {
   const [activeFloor, setActiveFloor] = useState<number>(3);
   const floors = [3, 4, 5, 6];
+  const rooms = useAppStore(state => state.rooms);
+
+  const floorLayout = useMemo(() => generateFloorLayout(rooms), [rooms]);
   const currentFloor = floorLayout[activeFloor];
 
   return (
@@ -423,12 +348,58 @@ function FloorHeatMap(): JSX.Element {
 }
 
 function NotificationList(): JSX.Element {
+  const careTasks = useAppStore(state => state.careTasks);
+  const inventoryItems = useAppStore(state => state.inventoryItems);
+  const carePlans = useAppStore(state => state.carePlans);
+
+  const notifications = useMemo<Notification[]>(() => {
+    const list: Notification[] = [];
+
+    const overdueTasks = careTasks.filter(t => t.isOverdue).slice(0, 4);
+    overdueTasks.forEach(task => {
+      list.push({
+        id: `task-${task.id}`,
+        type: 'danger',
+        title: '任务超时提醒',
+        message: `${task.roomNumber} ${task.customerName} - ${task.taskName}已超时，请尽快处理`,
+        time: timeAgo(task.scheduledTime),
+        target: `/schedules`,
+      });
+    });
+
+    const warningItems = inventoryItems.filter(i => i.status === '预警' || i.status === '紧缺').slice(0, 3);
+    warningItems.forEach(item => {
+      list.push({
+        id: `inv-${item.id}`,
+        type: 'warning',
+        title: item.status === '紧缺' ? '库存紧缺预警' : '库存不足预警',
+        message: `${item.name}库存${item.status}（剩余 ${item.currentStock} ${item.unit}），请及时补货`,
+        time: timeAgo(item.updateTime),
+        target: `/inventory`,
+      });
+    });
+
+    const pendingPlans = carePlans.filter(p => p.status === '待审批').slice(0, 3);
+    pendingPlans.forEach(plan => {
+      list.push({
+        id: `plan-${plan.id}`,
+        type: 'info',
+        title: '护理方案待审批',
+        message: `${plan.roomNumber} ${plan.customerName} - ${plan.planName}等待审批`,
+        time: timeAgo(plan.createTime),
+        target: `/care-plans/${plan.id}`,
+      });
+    });
+
+    return list.slice(0, 10);
+  }, [careTasks, inventoryItems, carePlans]);
+
   return (
     <div className="rounded-2xl bg-white p-6 shadow-lg transition-all duration-300 hover:shadow-xl h-full">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-800">预警通知</h3>
-          <p className="mt-1 text-sm text-gray-500">最新 10 条系统通知</p>
+          <p className="mt-1 text-sm text-gray-500">最新系统通知</p>
         </div>
         <button className="flex items-center gap-1 rounded-lg bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-600 transition-colors hover:bg-primary-100">
           <Bell className="h-4 w-4" />
@@ -437,40 +408,63 @@ function NotificationList(): JSX.Element {
       </div>
 
       <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-        {notifications.map((notification, index) => {
-          const config = notificationConfig[notification.type];
-          const Icon = config.icon;
-          return (
-            <div
-              key={notification.id}
-              className={`group flex cursor-pointer items-start gap-3 rounded-xl border ${config.border} ${config.bg} p-3 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 animate-card-fade-in`}
-              style={{ animationDelay: `${index * 50}ms` }}
-              onClick={() => {
-                console.log('跳转至:', notification.target);
-              }}
-            >
-              <div className={`flex-shrink-0 rounded-lg p-2 ${config.bg} border ${config.border}`}>
-                <Icon className={`h-5 w-5 ${config.text}`} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <h4 className="text-sm font-semibold text-gray-800 truncate">
-                    {notification.title}
-                  </h4>
-                  <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform group-hover:translate-x-1" />
+        {notifications.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+            <CheckCircle className="h-12 w-12 mb-3 opacity-50" />
+            <p className="text-sm">暂无预警通知</p>
+          </div>
+        ) : (
+          notifications.map((notification, index) => {
+            const config = notificationConfig[notification.type];
+            const Icon = config.icon;
+            return (
+              <div
+                key={notification.id}
+                className={`group flex cursor-pointer items-start gap-3 rounded-xl border ${config.border} ${config.bg} p-3 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 animate-card-fade-in`}
+                style={{ animationDelay: `${index * 50}ms` }}
+                onClick={() => {
+                  console.log('跳转至:', notification.target);
+                }}
+              >
+                <div className={`flex-shrink-0 rounded-lg p-2 ${config.bg} border ${config.border}`}>
+                  <Icon className={`h-5 w-5 ${config.text}`} />
                 </div>
-                <p className="mt-1 text-xs text-gray-600 line-clamp-2">{notification.message}</p>
-                <p className="mt-2 text-xs text-gray-400">{notification.time}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-gray-800 truncate">
+                      {notification.title}
+                    </h4>
+                    <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform group-hover:translate-x-1" />
+                  </div>
+                  <p className="mt-1 text-xs text-gray-600 line-clamp-2">{notification.message}</p>
+                  <p className="mt-2 text-xs text-gray-400">{notification.time}</p>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </div>
   );
 }
 
 function MiniCharts(): JSX.Element {
+  const rooms = useAppStore(state => state.rooms);
+  const customers = useAppStore(state => state.customers);
+
+  const avgOccupancy = useMemo(() => {
+    const total = rooms.length;
+    const occupied = rooms.filter(r => r.status === '已入住').length;
+    return total > 0 ? Math.round((occupied / total) * 100) : 0;
+  }, [rooms]);
+
+  const avgSatisfaction = useMemo(() => {
+    const inHouse = customers.filter(c => c.status === '在住');
+    if (inHouse.length === 0) return 0;
+    const total = inHouse.reduce((s, c) => s + (c.satisfactionScore ?? 0), 0);
+    return Math.round((total / inHouse.length) * 20);
+  }, [customers]);
+
   return (
     <div className="rounded-2xl bg-white p-6 shadow-lg transition-all duration-300 hover:shadow-xl">
       <div className="mb-4 flex items-center justify-between">
@@ -481,11 +475,11 @@ function MiniCharts(): JSX.Element {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <Star className="h-4 w-4 text-primary-500" />
-            <span className="text-sm font-medium text-gray-700">平均入住率: 80%</span>
+            <span className="text-sm font-medium text-gray-700">平均入住率: {avgOccupancy}%</span>
           </div>
           <div className="flex items-center gap-2">
             <LineChartIcon className="h-4 w-4 text-accent-500" />
-            <span className="text-sm font-medium text-gray-700">平均满意度: 90%</span>
+            <span className="text-sm font-medium text-gray-700">平均满意度: {avgSatisfaction}%</span>
           </div>
         </div>
       </div>
@@ -577,6 +571,84 @@ function MiniCharts(): JSX.Element {
 }
 
 export default function Dashboard(): JSX.Element {
+  const rooms = useAppStore(state => state.rooms);
+  const customers = useAppStore(state => state.customers);
+  const careTasks = useAppStore(state => state.careTasks);
+  const inventoryItems = useAppStore(state => state.inventoryItems);
+  const carePlans = useAppStore(state => state.carePlans);
+
+  const kpiCards = useMemo<KpiCard[]>(() => {
+    const totalRooms = rooms.length;
+    const occupiedRooms = rooms.filter(r => r.status === '已入住').length;
+    const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+    const inHouseCustomers = customers.filter(c => c.status === '在住').length;
+    const today = new Date().toDateString();
+    const todayTasks = careTasks.filter(t => new Date(t.scheduledTime).toDateString() === today).length;
+    const completedToday = careTasks.filter(t =>
+      t.status === '已完成' && t.completeTime && new Date(t.completeTime).toDateString() === today
+    ).length;
+    const completionRate = todayTasks > 0 ? Math.round((completedToday / todayTasks) * 100) : 91;
+    const inventoryWarnings = inventoryItems.filter(i => i.status === '预警' || i.status === '紧缺').length;
+    const pendingPlans = carePlans.filter(p => p.status === '待审批').length;
+
+    return [
+      {
+        title: '入住率',
+        value: occupancyRate,
+        unit: '%',
+        trend: 3.2,
+        icon: BedDouble,
+        gradient: 'from-primary-500 to-rose-400',
+        iconBg: 'bg-white/20',
+      },
+      {
+        title: '在住客户',
+        value: inHouseCustomers,
+        unit: '人',
+        trend: 5,
+        icon: Users,
+        gradient: 'from-accent-500 to-cyan-400',
+        iconBg: 'bg-white/20',
+      },
+      {
+        title: '今日任务数',
+        value: todayTasks || careTasks.length,
+        unit: '项',
+        trend: -2,
+        icon: CalendarCheck,
+        gradient: 'from-amber-500 to-orange-400',
+        iconBg: 'bg-white/20',
+      },
+      {
+        title: '完成率',
+        value: completionRate,
+        unit: '%',
+        trend: 4.5,
+        icon: ClipboardList,
+        gradient: 'from-emerald-500 to-green-400',
+        iconBg: 'bg-white/20',
+      },
+      {
+        title: '库存预警',
+        value: inventoryWarnings,
+        unit: '项',
+        trend: -1,
+        icon: Package,
+        gradient: 'from-violet-500 to-purple-400',
+        iconBg: 'bg-white/20',
+      },
+      {
+        title: '待审批方案',
+        value: pendingPlans,
+        unit: '个',
+        trend: 2,
+        icon: Sparkles,
+        gradient: 'from-pink-500 to-fuchsia-400',
+        iconBg: 'bg-white/20',
+      },
+    ];
+  }, [rooms, customers, careTasks, inventoryItems, carePlans]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-50 p-4 md:p-6 lg:p-8">
       <div className="mx-auto max-w-[1600px] space-y-6">
@@ -587,7 +659,7 @@ export default function Dashboard(): JSX.Element {
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <CalendarCheck className="h-4 w-4" />
-            <span>2026年6月17日 星期三</span>
+            <span>{new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</span>
           </div>
         </div>
 

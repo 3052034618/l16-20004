@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ClipboardList,
   Wrench,
@@ -28,7 +28,7 @@ import {
   ArrowRight,
   Package,
 } from 'lucide-react';
-import type { Equipment, MaintenanceWorkOrder, TaskPriority, SparePart } from '@/types';
+import type { Equipment, MaintenanceWorkOrder, WorkOrderPriority, WorkOrderStatus, SparePart } from '@/types';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
@@ -67,7 +67,8 @@ const workOrderStatusStyles: Record<MaintenanceWorkOrder['status'], { bg: string
   '已延期': { bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500' },
 };
 
-const priorityColors: Record<TaskPriority, string> = {
+const priorityColors: Record<WorkOrderPriority, string> = {
+  '紧急': 'bg-red-100 text-red-700 border-red-200',
   '高': 'bg-rose-100 text-rose-700 border-rose-200',
   '中': 'bg-amber-100 text-amber-700 border-amber-200',
   '低': 'bg-slate-100 text-slate-600 border-slate-200',
@@ -394,12 +395,37 @@ function EquipmentLedger() {
 }
 
 function WorkOrders() {
-  const { maintenanceWorkOrders, updateMaintenanceWorkOrder, spareParts, updateSparePart } = useAppStore();
+  const { maintenanceWorkOrders, updateMaintenanceWorkOrder, spareParts, updateSparePart, nurses, equipment } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('全部');
-  const [typeFilter, setTypeFilter] = useState<string>('全部');
+  const [priorityFilter, setPriorityFilter] = useState<string>('全部');
+  const [equipmentFilter, setEquipmentFilter] = useState<string>('全部');
+  const [engineerFilter, setEngineerFilter] = useState<string>('全部');
+  const [equipmentDropdownOpen, setEquipmentDropdownOpen] = useState(false);
+  const [engineerDropdownOpen, setEngineerDropdownOpen] = useState(false);
+  const equipmentDropdownRef = useRef<HTMLDivElement>(null);
+  const engineerDropdownRef = useRef<HTMLDivElement>(null);
 
-  const orderTypes: MaintenanceWorkOrder['orderType'][] = ['定期维护', '故障维修', '保养'];
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (equipmentDropdownRef.current && !equipmentDropdownRef.current.contains(e.target as Node)) {
+        setEquipmentDropdownOpen(false);
+      }
+      if (engineerDropdownRef.current && !engineerDropdownRef.current.contains(e.target as Node)) {
+        setEngineerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const priorityOptions = [
+    { value: '全部', label: '全部优先级' },
+    { value: '紧急', label: '最高级（紧急）' },
+    { value: '高', label: '高' },
+    { value: '中', label: '中' },
+    { value: '低', label: '低' },
+  ];
 
   const filteredOrders = maintenanceWorkOrders.filter((wo) => {
     if (searchQuery) {
@@ -412,7 +438,15 @@ function WorkOrders() {
         return false;
     }
     if (statusFilter !== '全部' && wo.status !== statusFilter) return false;
-    if (typeFilter !== '全部' && wo.orderType !== typeFilter) return false;
+    if (priorityFilter !== '全部') {
+      if (priorityFilter === '紧急') {
+        if (wo.priority !== '高' && wo.priority !== '紧急') return false;
+      } else {
+        if (wo.priority !== priorityFilter) return false;
+      }
+    }
+    if (equipmentFilter !== '全部' && wo.equipmentId !== equipmentFilter) return false;
+    if (engineerFilter !== '全部' && wo.assigneeId !== engineerFilter) return false;
     return true;
   });
 
@@ -494,10 +528,10 @@ function WorkOrders() {
   };
 
   const stats = {
-    pending: maintenanceWorkOrders.filter((w) => w.status === '待处理').length,
-    processing: maintenanceWorkOrders.filter((w) => w.status === '处理中').length,
-    completed: maintenanceWorkOrders.filter((w) => w.status === '已完成').length,
-    delayed: maintenanceWorkOrders.filter((w) => w.status === '已延期').length,
+    pending: filteredOrders.filter((w) => w.status === '待处理').length,
+    processing: filteredOrders.filter((w) => w.status === '处理中').length,
+    completed: filteredOrders.filter((w) => w.status === '已完成').length,
+    delayed: filteredOrders.filter((w) => w.status === '已延期').length,
   };
 
   return (
@@ -574,7 +608,7 @@ function WorkOrders() {
             >
               全部状态
             </button>
-            {(['待处理', '处理中', '已完成'] as const).map((s) => (
+            {(['待处理', '处理中', '已完成', '已延期'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
@@ -590,31 +624,161 @@ function WorkOrders() {
             ))}
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setTypeFilter('全部')}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                typeFilter === '全部'
-                  ? 'bg-sky-500 text-white'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
-              )}
-            >
-              全部类型
-            </button>
-            {orderTypes.map((t) => (
+            {priorityOptions.map((p) => (
               <button
-                key={t}
-                onClick={() => setTypeFilter(t)}
+                key={p.value}
+                onClick={() => setPriorityFilter(p.value)}
                 className={cn(
                   'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                  typeFilter === t
-                    ? 'bg-sky-500 text-white'
+                  priorityFilter === p.value
+                    ? p.value === '紧急'
+                      ? 'bg-rose-500 text-white'
+                      : 'bg-sky-500 text-white'
                     : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
                 )}
               >
-                {t}
+                {p.label}
               </button>
             ))}
+          </div>
+          <div className="relative" ref={equipmentDropdownRef}>
+            <button
+              onClick={() => {
+                setEquipmentDropdownOpen(!equipmentDropdownOpen);
+                setEngineerDropdownOpen(false);
+              }}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors min-w-[180px]',
+                equipmentFilter === '全部'
+                  ? 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'
+                  : 'bg-sky-500 text-white border-sky-500'
+              )}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span className="flex-1 text-left truncate">
+                {equipmentFilter === '全部'
+                  ? '全部设备'
+                  : equipment.find((e) => e.id === equipmentFilter)?.name || '全部设备'}
+              </span>
+              <ChevronRight
+                className={cn(
+                  'w-3.5 h-3.5 shrink-0 transition-transform',
+                  equipmentDropdownOpen && 'rotate-90'
+                )}
+              />
+            </button>
+            {equipmentDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-72 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1">
+                <button
+                  onClick={() => {
+                    setEquipmentFilter('全部');
+                    setEquipmentDropdownOpen(false);
+                  }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 text-xs transition-colors',
+                    equipmentFilter === '全部'
+                      ? 'bg-sky-50 text-sky-600 font-medium'
+                      : 'text-slate-600 hover:bg-slate-50'
+                  )}
+                >
+                  全部设备
+                </button>
+                {equipment.map((eq) => (
+                  <button
+                    key={eq.id}
+                    onClick={() => {
+                      setEquipmentFilter(eq.id);
+                      setEquipmentDropdownOpen(false);
+                    }}
+                    className={cn(
+                      'w-full text-left px-3 py-2 text-xs transition-colors border-t border-slate-50',
+                      equipmentFilter === eq.id
+                        ? 'bg-sky-50 text-sky-600 font-medium'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    )}
+                  >
+                    <div className="font-medium">{eq.name}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">📍 {eq.location}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="relative" ref={engineerDropdownRef}>
+            <button
+              onClick={() => {
+                setEngineerDropdownOpen(!engineerDropdownOpen);
+                setEquipmentDropdownOpen(false);
+              }}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-colors min-w-[160px]',
+                engineerFilter === '全部'
+                  ? 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'
+                  : 'bg-sky-500 text-white border-sky-500'
+              )}
+            >
+              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shrink-0">
+                <span className="text-[10px] text-white font-bold">
+                  {engineerFilter === '全部'
+                    ? '全'
+                    : nurses.find((n) => n.id === engineerFilter)?.name.slice(0, 1) || '全'}
+                </span>
+              </div>
+              <span className="flex-1 text-left truncate">
+                {engineerFilter === '全部'
+                  ? '全部工程师'
+                  : nurses.find((n) => n.id === engineerFilter)?.name || '全部工程师'}
+              </span>
+              <ChevronRight
+                className={cn(
+                  'w-3.5 h-3.5 shrink-0 transition-transform',
+                  engineerDropdownOpen && 'rotate-90'
+                )}
+              />
+            </button>
+            {engineerDropdownOpen && (
+              <div className="absolute top-full left-0 mt-1 w-60 max-h-72 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1">
+                <button
+                  onClick={() => {
+                    setEngineerFilter('全部');
+                    setEngineerDropdownOpen(false);
+                  }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2',
+                    engineerFilter === '全部'
+                      ? 'bg-sky-50 text-sky-600 font-medium'
+                      : 'text-slate-600 hover:bg-slate-50'
+                  )}
+                >
+                  <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                    <span className="text-[10px] text-slate-500 font-bold">全</span>
+                  </div>
+                  全部工程师
+                </button>
+                {nurses.map((nurse) => (
+                  <button
+                    key={nurse.id}
+                    onClick={() => {
+                      setEngineerFilter(nurse.id);
+                      setEngineerDropdownOpen(false);
+                    }}
+                    className={cn(
+                      'w-full text-left px-3 py-2 text-xs transition-colors flex items-center gap-2 border-t border-slate-50',
+                      engineerFilter === nurse.id
+                        ? 'bg-sky-50 text-sky-600 font-medium'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    )}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shrink-0">
+                      <span className="text-[10px] text-white font-bold">
+                        {nurse.name.slice(0, 1)}
+                      </span>
+                    </div>
+                    <span>{nurse.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">

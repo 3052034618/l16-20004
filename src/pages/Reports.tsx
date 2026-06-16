@@ -64,7 +64,6 @@ export default function Reports() {
 
   const occupancyData = useMemo(() => {
     const baseData = timeMode === 'week' ? weeklyOccupancyBase : monthlyOccupancyBase;
-    const multiplier = timeMode === 'week' ? 0.25 : 1;
 
     return baseData.map((item, idx) => {
       const result: Record<string, any> = { period: item.period };
@@ -72,10 +71,15 @@ export default function Reports() {
         if (selectedRoomType === '全部' || selectedRoomType === type) {
           const typeRooms = rooms.filter(r => r.roomType === type);
           const typeOccupied = typeRooms.filter(r => r.status === '已入住').length;
-          const baseCount = selectedRoomType === '全部'
-            ? Math.max(1, Math.round(typeOccupied * (0.85 + idx * 0.03) * multiplier))
-            : Math.round(typeOccupied * (0.85 + idx * 0.03) * multiplier);
-          result[type] = baseCount;
+          const typeTotal = typeRooms.length;
+          if (typeTotal > 0) {
+            const baseRate = typeOccupied / typeTotal;
+            const variation = (idx - baseData.length / 2) * 0.02;
+            const periodRate = Math.min(1, Math.max(0, baseRate + variation));
+            result[type] = Math.round(typeTotal * periodRate);
+          } else {
+            result[type] = 0;
+          }
         }
       });
       return result;
@@ -154,8 +158,9 @@ export default function Reports() {
       '设施': [],
     };
     const dimensions = ['环境', '服务', '餐饮', '护理', '专业', '设施'] as const;
-    targetCustomers.forEach((c, idx) => {
-      const base = c.satisfactionScore ? c.satisfactionScore * 20 : 88;
+    const customersWithScore = targetCustomers.filter(c => typeof c.satisfactionScore === 'number');
+    customersWithScore.forEach((c, idx) => {
+      const base = c.satisfactionScore! * 20;
       dimensions.forEach((dim, dIdx) => {
         const variation = ((idx + dIdx) % 7) - 3;
         baseScores[dim].push(Math.min(100, Math.max(70, base + variation)));
@@ -175,9 +180,10 @@ export default function Reports() {
   const satisfactionTrendData = useMemo(() => {
     const targetCustomers = filteredCustomers;
     const months = ['1月', '2月', '3月', '4月', '5月', '6月'];
-    const hasData = targetCustomers.length > 0;
+    const customersWithScore = targetCustomers.filter(c => typeof c.satisfactionScore === 'number');
+    const hasData = customersWithScore.length > 0;
     const baseAvg = hasData
-      ? (targetCustomers.reduce((s, c) => s + (c.satisfactionScore ? c.satisfactionScore * 20 : 88), 0) / targetCustomers.length)
+      ? (customersWithScore.reduce((s, c) => s + c.satisfactionScore! * 20, 0) / customersWithScore.length)
       : 0;
 
     return months.map((month, idx) => {
@@ -236,7 +242,10 @@ export default function Reports() {
     const filteredTasks = careTasks.filter(t => filteredCustomerIds.has(t.customerId));
     const totalTasks = filteredTasks.length;
     const completedTasks = filteredTasks.filter(t => t.status === '已完成').length;
-    const avgSatisfaction = satisfactionRadarData.reduce((s, r) => s + r.score, 0) / satisfactionRadarData.length;
+    const customersWithScore = filteredCustomers.filter(c => typeof c.satisfactionScore === 'number');
+    const avgSatisfactionScore = customersWithScore.length > 0
+      ? (customersWithScore.reduce((s, c) => s + c.satisfactionScore!, 0) / customersWithScore.length) * 20
+      : 0;
 
     return {
       totalRooms,
@@ -245,13 +254,13 @@ export default function Reports() {
       totalTasks,
       completedTasks,
       taskCompletionRate: totalTasks > 0 ? ((completedTasks / totalTasks) * 100).toFixed(1) : '0.0',
-      avgSatisfaction: avgSatisfaction.toFixed(1),
+      avgSatisfaction: avgSatisfactionScore.toFixed(1),
       avgTaskDuration: Math.round(
         filteredTasks.filter(t => t.status === '已完成').reduce((s, t) => s + (t.actualDuration ?? t.duration), 0) /
         Math.max(1, completedTasks)
       )
     };
-  }, [filteredRooms, careTasks, filteredCustomerIds, satisfactionRadarData]);
+  }, [filteredRooms, careTasks, filteredCustomerIds, filteredCustomers]);
 
   const handleExportPDF = async () => {
     if (!reportContentRef.current || isExporting) return;
