@@ -8,7 +8,7 @@ export type RoomType = '标准间' | '豪华间' | 'VIP套房' | '总统套房';
 
 export type DeliveryMethod = '顺产' | '剖宫产' | '顺产侧切' | '产钳助产';
 
-export type TaskStatus = '待执行' | '进行中' | '已完成' | '已超时' | '已取消';
+export type TaskStatus = '待执行' | '进行中' | '已完成' | '已超时' | '已取消' | '调整中';
 
 export type TaskPriority = '高' | '中' | '低';
 
@@ -144,6 +144,9 @@ export interface CareTask {
   isOverdue: boolean;
   createTime: string;
   completeTime?: string;
+  adjustReason?: string;
+  adjustTime?: string;
+  operatorName?: string;
 }
 
 export interface CarePlan {
@@ -173,7 +176,7 @@ export interface ApprovalRecord {
   id: string;
   operatorId: string;
   operatorName: string;
-  action: '提交' | '通过' | '驳回' | '调整';
+  action: string;
   comment?: string;
   operateTime: string;
 }

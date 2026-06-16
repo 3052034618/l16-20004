@@ -3,6 +3,26 @@ import { db, type Equipment, type MaintenanceWorkOrder, type EquipmentStatus, ty
 
 const router = Router()
 
+const statusMap: Record<string, WorkOrderStatus> = {
+  'pending': 'pending',
+  '待处理': 'pending',
+  'inProgress': 'inProgress',
+  '处理中': 'inProgress',
+  'completed': 'completed',
+  '已完成': 'completed',
+  'cancelled': 'cancelled',
+  '已取消': 'cancelled',
+}
+
+const priorityMap: Record<string, 'low' | 'medium' | 'high'> = {
+  'low': 'low',
+  '低': 'low',
+  'medium': 'medium',
+  '中': 'medium',
+  'high': 'high',
+  '高': 'high',
+}
+
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   const {
     status, location, category, search, page = 1, pageSize = 50 } = req.query
@@ -126,136 +146,6 @@ router.get('/stats/summary', async (_req: Request, res: Response): Promise<void>
   })
 })
 
-router.get('/:id', async (req: Request, res: Response): Promise<void> => {
-  const equipment = db.equipment.find(e => e.id === req.params.id)
-  if (!equipment) {
-    res.status(404).json({ success: false, error: 'Equipment not found' })
-    return
-  }
-
-  const workOrders = db.workOrders.filter(w => w.equipmentId === equipment.id)
-  const parts = equipment.spareParts.map(sp => {
-    const item = db.inventory.find(i => i.id === sp.inventoryItemId)
-    return {
-      ...sp,
-    currentStock: item?.currentStock ?? 0,
-      unit: item?.unit ?? '',
-      inStock: item ? item.currentStock >= sp.requiredQuantity : false,
-    }
-  })
-
-  res.json({
-    success: true,
-    data: {
-      ...equipment,
-      workOrders,
-    partsWithStock: parts,
-  },
-  })
-})
-
-router.post('/', async (req: Request, res: Response): Promise<void> => {
-  const body = req.body as Partial<Equipment> & {
-    name: string
-    brand: string
-    model: string
-    location: string
-  }
-
-  if (!body.name || !body.brand || !body.model || !body.location) {
-    res.status(400).json({
-      success: false,
-      error: '缺少必要字段: name, brand, model, location',
-    })
-    return
-  }
-
-  const equipment: Equipment = {
-    id: db.genId('eq'),
-    name: body.name,
-    brand: body.brand,
-    model: body.model,
-    serialNumber: body.serialNumber || `SN${Date.now()}`,
-    purchaseDate: body.purchaseDate || new Date().toISOString().split('T')[0],
-    status: body.status || 'normal',
-    usageCount: body.usageCount ?? 0,
-    maxUsageBeforeMaintenance: body.maxUsageBeforeMaintenance ?? 500,
-    lastMaintenanceDate: body.lastMaintenanceDate || new Date().toISOString().split('T')[0],
-    nextMaintenanceDate: body.nextMaintenanceDate || (() => {
-      const d = new Date()
-      d.setDate(d.getDate() + 30)
-      return d.toISOString().split('T')[0]
-    })(),
-    location: body.location,
-    spareParts: body.spareParts || [],
-  }
-
-  db.equipment.push(equipment)
-
-  res.status(201).json({
-    success: true,
-    data: equipment,
-  })
-})
-
-router.put('/:id', async (req: Request, res: Response): Promise<void> => {
-  const idx = db.equipment.findIndex(e => e.id === req.params.id)
-  if (idx === -1) {
-    res.status(404).json({ success: false, error: 'Equipment not found' })
-    return
-  }
-
-  db.equipment[idx] = {
-    ...db.equipment[idx],
-    ...req.body,
-  }
-
-  res.json({
-    success: true,
-    data: db.equipment[idx],
-  })
-})
-
-router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
-  const idx = db.equipment.findIndex(e => e.id === req.params.id)
-  if (idx === -1) {
-    res.status(404).json({ success: false, error: 'Equipment not found' })
-    return
-  }
-
-  db.equipment.splice(idx, 1)
-  res.json({ success: true })
-})
-
-router.post('/:id/maintenance', async (req: Request, res: Response): Promise<void> => {
-  const equipment = db.equipment.find(e => e.id === req.params.id)
-  if (!equipment) {
-    res.status(404).json({ success: false, error: 'Equipment not found' })
-    return
-  }
-
-  const { description, priority, engineerId } = req.body
-
-  const workOrder: MaintenanceWorkOrder = {
-    id: db.genId('wo'),
-    equipmentId: equipment.id,
-    engineerId: engineerId || null,
-    status: 'pending',
-    priority: priority || 'medium',
-    description: description || '定期维护保养',
-    createdAt: new Date().toISOString(),
-    partsUsed: [],
-  }
-
-  db.workOrders.push(workOrder)
-  equipment.status = 'maintenance'
-
-  res.status(201).json({
-    success: true,
-    data: workOrder,
-  })
-})
-
 router.get('/work-orders', async (req: Request, res: Response): Promise<void> => {
   const {
     status, priority, equipmentId, engineerId, page = 1, pageSize = 50 } = req.query
@@ -263,13 +153,23 @@ router.get('/work-orders', async (req: Request, res: Response): Promise<void> =>
   let orders = [...db.workOrders]
 
   if (status) {
-    orders = orders.filter(w => w.status === status)
+    const mappedStatus = statusMap[String(status)]
+    if (mappedStatus) {
+      orders = orders.filter(w => w.status === mappedStatus)
+    }
   }
   if (priority) {
-    orders = orders.filter(w => w.priority === priority)
+    const mappedPriority = priorityMap[String(priority)]
+    if (mappedPriority) {
+      orders = orders.filter(w => w.priority === mappedPriority)
+    }
   }
   if (equipmentId) {
-    orders = orders.filter(w => w.equipmentId === equipmentId)
+    const eqIdStr = String(equipmentId)
+    const matchedEquipmentIds = db.equipment
+      .filter(e => e.id === eqIdStr || e.name.includes(eqIdStr))
+      .map(e => e.id)
+    orders = orders.filter(w => matchedEquipmentIds.includes(w.equipmentId))
   }
   if (engineerId) {
     orders = orders.filter(w => w.engineerId === engineerId)
@@ -295,6 +195,7 @@ router.get('/work-orders', async (req: Request, res: Response): Promise<void> =>
   })
 
   const summary = {
+    total: db.workOrders.length,
     pending: db.workOrders.filter(w => w.status === 'pending').length,
     inProgress: db.workOrders.filter(w => w.status === 'inProgress').length,
     completed: db.workOrders.filter(w => w.status === 'completed').length,
@@ -443,6 +344,136 @@ router.put('/work-orders/:id', async (req: Request, res: Response): Promise<void
   res.json({
     success: true,
     data: db.workOrders[idx],
+  })
+})
+
+router.get('/:id', async (req: Request, res: Response): Promise<void> => {
+  const equipment = db.equipment.find(e => e.id === req.params.id)
+  if (!equipment) {
+    res.status(404).json({ success: false, error: 'Equipment not found' })
+    return
+  }
+
+  const workOrders = db.workOrders.filter(w => w.equipmentId === equipment.id)
+  const parts = equipment.spareParts.map(sp => {
+    const item = db.inventory.find(i => i.id === sp.inventoryItemId)
+    return {
+      ...sp,
+    currentStock: item?.currentStock ?? 0,
+      unit: item?.unit ?? '',
+      inStock: item ? item.currentStock >= sp.requiredQuantity : false,
+    }
+  })
+
+  res.json({
+    success: true,
+    data: {
+      ...equipment,
+      workOrders,
+    partsWithStock: parts,
+  },
+  })
+})
+
+router.post('/', async (req: Request, res: Response): Promise<void> => {
+  const body = req.body as Partial<Equipment> & {
+    name: string
+    brand: string
+    model: string
+    location: string
+  }
+
+  if (!body.name || !body.brand || !body.model || !body.location) {
+    res.status(400).json({
+      success: false,
+      error: '缺少必要字段: name, brand, model, location',
+    })
+    return
+  }
+
+  const equipment: Equipment = {
+    id: db.genId('eq'),
+    name: body.name,
+    brand: body.brand,
+    model: body.model,
+    serialNumber: body.serialNumber || `SN${Date.now()}`,
+    purchaseDate: body.purchaseDate || new Date().toISOString().split('T')[0],
+    status: body.status || 'normal',
+    usageCount: body.usageCount ?? 0,
+    maxUsageBeforeMaintenance: body.maxUsageBeforeMaintenance ?? 500,
+    lastMaintenanceDate: body.lastMaintenanceDate || new Date().toISOString().split('T')[0],
+    nextMaintenanceDate: body.nextMaintenanceDate || (() => {
+      const d = new Date()
+      d.setDate(d.getDate() + 30)
+      return d.toISOString().split('T')[0]
+    })(),
+    location: body.location,
+    spareParts: body.spareParts || [],
+  }
+
+  db.equipment.push(equipment)
+
+  res.status(201).json({
+    success: true,
+    data: equipment,
+  })
+})
+
+router.put('/:id', async (req: Request, res: Response): Promise<void> => {
+  const idx = db.equipment.findIndex(e => e.id === req.params.id)
+  if (idx === -1) {
+    res.status(404).json({ success: false, error: 'Equipment not found' })
+    return
+  }
+
+  db.equipment[idx] = {
+    ...db.equipment[idx],
+    ...req.body,
+  }
+
+  res.json({
+    success: true,
+    data: db.equipment[idx],
+  })
+})
+
+router.delete('/:id', async (req: Request, res: Response): Promise<void> => {
+  const idx = db.equipment.findIndex(e => e.id === req.params.id)
+  if (idx === -1) {
+    res.status(404).json({ success: false, error: 'Equipment not found' })
+    return
+  }
+
+  db.equipment.splice(idx, 1)
+  res.json({ success: true })
+})
+
+router.post('/:id/maintenance', async (req: Request, res: Response): Promise<void> => {
+  const equipment = db.equipment.find(e => e.id === req.params.id)
+  if (!equipment) {
+    res.status(404).json({ success: false, error: 'Equipment not found' })
+    return
+  }
+
+  const { description, priority, engineerId } = req.body
+
+  const workOrder: MaintenanceWorkOrder = {
+    id: db.genId('wo'),
+    equipmentId: equipment.id,
+    engineerId: engineerId || null,
+    status: 'pending',
+    priority: priority || 'medium',
+    description: description || '定期维护保养',
+    createdAt: new Date().toISOString(),
+    partsUsed: [],
+  }
+
+  db.workOrders.push(workOrder)
+  equipment.status = 'maintenance'
+
+  res.status(201).json({
+    success: true,
+    data: workOrder,
   })
 })
 

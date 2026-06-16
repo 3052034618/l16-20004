@@ -72,7 +72,9 @@ export default function Reports() {
         if (selectedRoomType === '全部' || selectedRoomType === type) {
           const typeRooms = rooms.filter(r => r.roomType === type);
           const typeOccupied = typeRooms.filter(r => r.status === '已入住').length;
-          const baseCount = Math.max(1, Math.round(typeOccupied * (0.85 + idx * 0.03) * multiplier));
+          const baseCount = selectedRoomType === '全部'
+            ? Math.max(1, Math.round(typeOccupied * (0.85 + idx * 0.03) * multiplier))
+            : Math.round(typeOccupied * (0.85 + idx * 0.03) * multiplier);
           result[type] = baseCount;
         }
       });
@@ -84,6 +86,15 @@ export default function Reports() {
     if (selectedRoomType === '全部') return roomTypeList;
     return [selectedRoomType] as RoomType[];
   }, [selectedRoomType]);
+
+  const hasOccupancyData = useMemo(() => {
+    if (selectedRoomType === '全部') return true;
+    return occupancyData.some(item => {
+      return chartRoomTypes.some(type => (item[type] ?? 0) > 0);
+    });
+  }, [occupancyData, chartRoomTypes, selectedRoomType]);
+
+  const hasFilteredCustomers = useMemo(() => filteredCustomers.length > 0, [filteredCustomers]);
 
   const roomTypeDistribution = useMemo(() => {
     if (selectedRoomType === '全部') {
@@ -98,8 +109,11 @@ export default function Reports() {
         percent: ((byType[type] / total) * 100).toFixed(1)
       }));
     } else {
-      const total = rooms.length;
       const selectedCount = rooms.filter(r => r.roomType === selectedRoomType).length;
+      if (selectedCount === 0) {
+        return [];
+      }
+      const total = rooms.length;
       const otherCount = total - selectedCount;
       return [
         {
@@ -130,7 +144,7 @@ export default function Reports() {
   }, [rooms, selectedRoomType]);
 
   const satisfactionRadarData = useMemo(() => {
-    const targetCustomers = filteredCustomers.length > 0 ? filteredCustomers : customers;
+    const targetCustomers = filteredCustomers;
     const baseScores: Record<string, number[]> = {
       '环境': [],
       '服务': [],
@@ -152,20 +166,33 @@ export default function Reports() {
       score: Number((
         baseScores[dim].length > 0
           ? baseScores[dim].reduce((s, v) => s + v, 0) / baseScores[dim].length
-          : 88
+          : 0
       ).toFixed(0)),
       fullMark: 100
     }));
-  }, [filteredCustomers, customers]);
+  }, [filteredCustomers]);
 
   const satisfactionTrendData = useMemo(() => {
-    const targetCustomers = filteredCustomers.length > 0 ? filteredCustomers : customers;
+    const targetCustomers = filteredCustomers;
     const months = ['1月', '2月', '3月', '4月', '5月', '6月'];
-    const baseAvg = targetCustomers.length > 0
+    const hasData = targetCustomers.length > 0;
+    const baseAvg = hasData
       ? (targetCustomers.reduce((s, c) => s + (c.satisfactionScore ? c.satisfactionScore * 20 : 88), 0) / targetCustomers.length)
-      : 90;
+      : 0;
 
     return months.map((month, idx) => {
+      if (!hasData) {
+        return {
+          month,
+          '平均分': 0,
+          '环境': 0,
+          '服务': 0,
+          '餐饮': 0,
+          '护理': 0,
+          '专业': 0,
+          '设施': 0,
+        };
+      }
       const trend = Math.round((idx - 2.5) * 0.8);
       const avg = Math.min(100, Math.max(75, baseAvg + trend));
       return {
@@ -179,7 +206,7 @@ export default function Reports() {
         '设施': Number((avg - 4 + (idx % 3)).toFixed(0)),
       };
     });
-  }, [filteredCustomers, customers]);
+  }, [filteredCustomers]);
 
   const taskEfficiencyData = useMemo(() => {
     return nurses.map(nurse => {
@@ -386,46 +413,55 @@ export default function Reports() {
                 </button>
               </div>
             </div>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={occupancyData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                  <XAxis
-                    dataKey="period"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 12 }}
-                    dy={8}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: '#6b7280', fontSize: 12 }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: 'none',
-                      borderRadius: '12px',
-                      boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-                      padding: '12px 16px',
-                    }}
-                    labelStyle={{ fontWeight: 600, color: '#374151', marginBottom: '8px' }}
-                  />
-                  <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} iconSize={8} />
-                  {chartRoomTypes.map((type, idx) => (
-                    <Bar
-                      key={type}
-                      dataKey={type}
-                      stackId={selectedRoomType === '全部' ? 'a' : undefined}
-                      fill={pinkPalette[idx % pinkPalette.length]}
-                      radius={selectedRoomType === '全部'
-                        ? (idx === chartRoomTypes.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0])
-                        : [4, 4, 0, 0]}
+            <div className="h-80 relative">
+              {!hasOccupancyData ? (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="text-gray-400 text-lg font-medium">暂无数据</div>
+                    <div className="text-gray-400 text-sm mt-1">该房型暂无入住记录</div>
+                  </div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={occupancyData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                    <XAxis
+                      dataKey="period"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#6b7280', fontSize: 12 }}
+                      dy={8}
                     />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: '#6b7280', fontSize: 12 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: 'none',
+                        borderRadius: '12px',
+                        boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+                        padding: '12px 16px',
+                      }}
+                      labelStyle={{ fontWeight: 600, color: '#374151', marginBottom: '8px' }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} iconSize={8} />
+                    {chartRoomTypes.map((type, idx) => (
+                      <Bar
+                        key={type}
+                        dataKey={type}
+                        stackId={selectedRoomType === '全部' ? 'a' : undefined}
+                        fill={pinkPalette[idx % pinkPalette.length]}
+                        radius={selectedRoomType === '全部'
+                          ? (idx === chartRoomTypes.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0])
+                          : [4, 4, 0, 0]}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
@@ -442,36 +478,45 @@ export default function Reports() {
                   </p>
                 </div>
               </div>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={roomTypeDistribution}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={95}
-                      paddingAngle={2}
-                      dataKey="value"
-                      label={({ name, percent }) => `${name} ${percent}%`}
-                      labelLine={{ strokeWidth: 1 }}
-                    >
-                      {roomTypeDistribution.map((_, idx) => (
-                        <Cell key={`cell-${idx}`} fill={pinkPalette[idx % pinkPalette.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: 'none',
-                        borderRadius: '12px',
-                        boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-                        padding: '12px 16px',
-                      }}
-                      formatter={(value: number, _name, props) => [`${value}间 (${props.payload.percent}%)`, props.payload.name]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+              <div className="h-72 relative">
+                {roomTypeDistribution.length === 0 ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-gray-400 text-lg font-medium">暂无数据</div>
+                      <div className="text-gray-400 text-sm mt-1">该房型暂无房间</div>
+                    </div>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={roomTypeDistribution}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={95}
+                        paddingAngle={2}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name} ${percent}%`}
+                        labelLine={{ strokeWidth: 1 }}
+                      >
+                        {roomTypeDistribution.map((_, idx) => (
+                          <Cell key={`cell-${idx}`} fill={pinkPalette[idx % pinkPalette.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'white',
+                          border: 'none',
+                          borderRadius: '12px',
+                          boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+                          padding: '12px 16px',
+                        }}
+                        formatter={(value: number, _name, props) => [`${value}间 (${props.payload.percent}%)`, props.payload.name]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 
@@ -505,7 +550,9 @@ export default function Reports() {
                         className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out"
                         style={{
                           width: `${item.value}%`,
-                          background: `linear-gradient(90deg, ${pinkPalette[idx % pinkPalette.length]}, ${pinkPalette[(idx + 1) % pinkPalette.length]})`
+                          background: item.value === 0
+                            ? '#9ca3af'
+                            : `linear-gradient(90deg, ${pinkPalette[idx % pinkPalette.length]}, ${pinkPalette[(idx + 1) % pinkPalette.length]})`
                         }}
                       />
                     </div>
@@ -528,7 +575,7 @@ export default function Reports() {
                   </p>
                 </div>
               </div>
-              <div className="h-72">
+              <div className="h-72 relative">
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart data={satisfactionRadarData}>
                     <PolarGrid stroke="#e5e7eb" />
@@ -537,9 +584,9 @@ export default function Reports() {
                     <Radar
                       name="满意度评分"
                       dataKey="score"
-                      stroke="#E91E63"
-                      fill="#EC407A"
-                      fillOpacity={0.35}
+                      stroke={selectedRoomType !== '全部' && !hasFilteredCustomers ? '#9ca3af' : '#E91E63'}
+                      fill={selectedRoomType !== '全部' && !hasFilteredCustomers ? '#9ca3af' : '#EC407A'}
+                      fillOpacity={selectedRoomType !== '全部' && !hasFilteredCustomers ? 0.1 : 0.35}
                       strokeWidth={2}
                     />
                     <Tooltip
@@ -554,6 +601,13 @@ export default function Reports() {
                     />
                   </RadarChart>
                 </ResponsiveContainer>
+                {selectedRoomType !== '全部' && !hasFilteredCustomers && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="text-center bg-white/80 rounded-lg px-4 py-2">
+                      <div className="text-gray-400 text-sm font-medium">暂无数据</div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -569,29 +623,46 @@ export default function Reports() {
                   </p>
                 </div>
               </div>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={satisfactionTrendData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                    <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} dy={8} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} domain={[75, 100]} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: 'none',
-                        borderRadius: '12px',
-                        boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-                        padding: '12px 16px',
-                      }}
-                      labelStyle={{ fontWeight: 600, color: '#374151', marginBottom: '8px' }}
-                    />
-                    <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} iconSize={8} />
-                    <Line type="monotone" dataKey="平均分" stroke="#E91E63" strokeWidth={3} dot={{ fill: '#E91E63', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />
-                    <Line type="monotone" dataKey="服务" stroke="#EC407A" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                    <Line type="monotone" dataKey="护理" stroke="#00ACC1" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                    <Line type="monotone" dataKey="餐饮" stroke="#FF9800" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+              <div>
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={satisfactionTrendData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                      <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#6b7280', fontSize: 12 }} dy={8} />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                        domain={selectedRoomType !== '全部' && !hasFilteredCustomers ? [0, 100] : [75, 100]}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'white',
+                          border: 'none',
+                          borderRadius: '12px',
+                          boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+                          padding: '12px 16px',
+                        }}
+                        labelStyle={{ fontWeight: 600, color: '#374151', marginBottom: '8px' }}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ paddingTop: '10px' }} iconSize={8} />
+                      <Line
+                        type="monotone"
+                        dataKey="平均分"
+                        stroke={selectedRoomType !== '全部' && !hasFilteredCustomers ? '#9ca3af' : '#E91E63'}
+                        strokeWidth={3}
+                        dot={{ fill: selectedRoomType !== '全部' && !hasFilteredCustomers ? '#9ca3af' : '#E91E63', strokeWidth: 2, r: 4 }}
+                        activeDot={{ r: 6 }}
+                      />
+                      <Line type="monotone" dataKey="服务" stroke={selectedRoomType !== '全部' && !hasFilteredCustomers ? '#d1d5db' : '#EC407A'} strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                      <Line type="monotone" dataKey="护理" stroke={selectedRoomType !== '全部' && !hasFilteredCustomers ? '#d1d5db' : '#00ACC1'} strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                      <Line type="monotone" dataKey="餐饮" stroke={selectedRoomType !== '全部' && !hasFilteredCustomers ? '#d1d5db' : '#FF9800'} strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                {selectedRoomType !== '全部' && !hasFilteredCustomers && (
+                  <div className="mt-3 text-center text-gray-400 text-sm">该房型暂无入住客户</div>
+                )}
               </div>
             </div>
           </div>
@@ -692,7 +763,15 @@ export default function Reports() {
                 </div>
                 <p className="mt-2 text-2xl font-bold text-gray-800">{summaryStats.occupancyRate}<span className="text-sm font-normal text-gray-400 ml-1">%</span></p>
                 <div className="mt-2 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-emerald-400 to-green-500 rounded-full" style={{ width: `${summaryStats.occupancyRate}%` }} />
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${summaryStats.occupancyRate}%`,
+                      background: Number(summaryStats.occupancyRate) === 0
+                        ? '#9ca3af'
+                        : 'linear-gradient(90deg, #34d399, #22c55e)'
+                    }}
+                  />
                 </div>
               </div>
               <div className="rounded-xl bg-white p-4 shadow-sm border border-amber-100">

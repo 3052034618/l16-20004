@@ -93,6 +93,8 @@ function TaskCard({
   isDragging,
   isOverColumn,
   getNurse,
+  onAccept,
+  onApplyAdjust,
 }: {
   task: CareTask;
   onDragStart: (id: string) => void;
@@ -101,11 +103,14 @@ function TaskCard({
   isDragging: boolean;
   isOverColumn: boolean;
   getNurse: (id?: string) => Nurse | undefined;
+  onAccept: (task: CareTask) => void;
+  onApplyAdjust: (task: CareTask) => void;
 }) {
   const nurse = getNurse(task.assigneeId);
   const catStyle = categoryIcons[task.category];
   const CatIcon = catStyle.icon;
   const isOverdue = task.isOverdue || task.status === '已超时';
+  const showActionButtons = task.status === '待执行' && !!task.assigneeId;
 
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -202,6 +207,30 @@ function TaskCard({
           )}>
             {task.priority}
           </span>
+          {showActionButtons && (
+            <div className="flex items-center gap-1 ml-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAccept(task);
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-white bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 transition-all shadow-sm shadow-emerald-500/30"
+              >
+                <CheckCircle2 className="w-3 h-3" />
+                确认接收
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApplyAdjust(task);
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 transition-all shadow-sm shadow-amber-500/30"
+              >
+                <AlertCircle className="w-3 h-3" />
+                申请调整
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -217,13 +246,14 @@ function TaskCard({
 }
 
 export default function Tasks() {
-  const { careTasks: tasks, nurses, updateCareTask } = useAppStore();
+  const { careTasks: tasks, nurses, carePlans, updateCareTask, updateCarePlan } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [nurseFilter, setNurseFilter] = useState<NurseFilter>('全部');
   const [taskTypeFilter, setTaskTypeFilter] = useState<TaskTypeFilter>('全部');
   const [dateFilter, setDateFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | '全部'>('全部');
   const [drag, setDrag] = useState<DragState>({ taskId: null, fromColumn: null, overColumn: null });
+  const [adjustTask, setAdjustTask] = useState<CareTask | null>(null);
 
   const getNurse = (id?: string) => nurses.find(n => n.id === id);
 
@@ -278,6 +308,54 @@ export default function Tasks() {
       fromColumn: task ? getColumnStatus(task.status) : null,
       overColumn: null,
     });
+  };
+
+  const handleAcceptTask = (task: CareTask) => {
+    const nurse = getNurse(task.assigneeId);
+    updateCareTask(task.id, {
+      status: '进行中',
+      startTime: new Date().toISOString(),
+      operatorName: nurse?.name || '护理师',
+    });
+  };
+
+  const handleApplyAdjust = (task: CareTask, reason: string) => {
+    const now = new Date().toISOString();
+    const nurse = getNurse(task.assigneeId);
+    const nowFormatted = formatDateTime(new Date());
+
+    updateCareTask(task.id, {
+      status: '调整中',
+      adjustReason: reason,
+      adjustTime: now,
+      operatorName: nurse?.name || '护理师',
+    });
+
+    const carePlan = carePlans.find(p => p.id === task.carePlanId);
+    if (carePlan) {
+      const existingApprovalIds = carePlan.approvalHistory.map(a => a.id);
+      const maxIdNum = existingApprovalIds.length > 0
+        ? Math.max(...existingApprovalIds.map(id => parseInt(id.replace(/\D/g, '')) || 0))
+        : 0;
+      const newApprovalId = `APR${String(maxIdNum + 1).padStart(4, '0')}`;
+
+      updateCarePlan(carePlan.id, {
+        status: '已调整',
+        approvalHistory: [
+          ...carePlan.approvalHistory,
+          {
+            id: newApprovalId,
+            operatorId: task.assigneeId || '',
+            operatorName: nurse?.name || '护理师',
+            action: '任务调整申请',
+            comment: `【任务：${task.taskName}】调整原因：${reason}`,
+            operateTime: nowFormatted,
+          },
+        ],
+      });
+    }
+
+    setAdjustTask(null);
   };
 
   const handleDragEnd = () => {
@@ -497,6 +575,8 @@ export default function Tasks() {
                       isDragging={drag.taskId === task.id}
                       isOverColumn={drag.overColumn === col.status && drag.taskId !== task.id}
                       getNurse={getNurse}
+                      onAccept={handleAcceptTask}
+                      onApplyAdjust={(t) => setAdjustTask(t)}
                     />
                   ))}
 
@@ -529,6 +609,128 @@ export default function Tasks() {
             );
           })}
         </div>
+      </div>
+      {adjustTask && (
+        <AdjustTaskDialog
+          task={adjustTask}
+          nurse={getNurse(adjustTask.assigneeId)}
+          onClose={() => setAdjustTask(null)}
+          onCancel={() => setAdjustTask(null)}
+          onSubmit={(reason) => handleApplyAdjust(adjustTask, reason)}
+        />
+      )}
+    </div>
+  );
+}
+
+function AdjustTaskDialog({
+  task,
+  nurse,
+  onClose,
+  onCancel,
+  onSubmit,
+}: {
+  task: CareTask;
+  nurse?: Nurse;
+  onClose: () => void;
+  onCancel: () => void;
+  onSubmit: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (reason.trim()) {
+      onSubmit(reason.trim());
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-500 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-white" />
+            <h2 className="text-lg font-bold text-white">申请任务调整</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="p-6 space-y-4">
+            <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">任务名称</span>
+                <span className="text-sm font-medium text-slate-800">{task.taskName}</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">服务客户</span>
+                <span className="text-sm text-slate-700">
+                  {task.customerName} · {task.roomNumber}室
+                </span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">护理师</span>
+                <span className="text-sm text-slate-700">
+                  {nurse ? (
+                    <span className="flex items-center gap-2">
+                      <Avatar name={nurse.name} />
+                      {nurse.name}
+                    </span>
+                  ) : (
+                    '待分配'
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                调整原因 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="请详细说明需要调整任务的原因..."
+                rows={4}
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400 resize-none"
+                required
+              />
+              {!reason.trim() && (
+                <p className="mt-1.5 text-[11px] text-slate-400">请填写调整原因后再提交</p>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!reason.trim()}
+              className={cn(
+                'px-5 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm transition-all flex items-center gap-1.5',
+                reason.trim()
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-amber-500/25'
+                  : 'bg-slate-300 cursor-not-allowed shadow-none'
+              )}
+            >
+              <AlertCircle className="w-4 h-4" />
+              提交申请
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
