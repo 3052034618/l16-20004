@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: #213547;
+  background-color: #ffffff;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Noto Serif SC', Georgia, serif;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@layer utilities {
+  @keyframes heat-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(233, 30, 99, 0.7);
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 0.85;
+      box-shadow: 0 0 0 12px rgba(233, 30, 99, 0);
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(233, 30, 99, 0);
+    }
+  }
+
+  .animate-heat-pulse {
+    animation: heat-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes card-fade-in {
+    0% {
+      opacity: 0;
+      transform: translateY(24px) scale(0.96);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .animate-card-fade-in {
+    animation: card-fade-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes breathing {
+    0%, 100% {
+      opacity: 0.4;
+      box-shadow: 0 0 4px rgba(0, 172, 193, 0.3);
+    }
+    50% {
+      opacity: 1;
+      box-shadow: 0 0 20px 4px rgba(0, 172, 193, 0.6);
+    }
+  }
+
+  .animate-breathing {
+    animation: breathing 2.4s ease-in-out infinite;
+  }
+}

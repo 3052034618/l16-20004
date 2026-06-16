@@ -1,0 +1,949 @@
+import { useState } from 'react';
+import {
+  ClipboardList,
+  Wrench,
+  Boxes,
+  Search,
+  Plus,
+  RefreshCw,
+  AlertTriangle,
+  Cpu,
+  Thermometer,
+  Activity,
+  Wind,
+  Bath,
+  Baby,
+  Stethoscope,
+  Scale,
+  Fan,
+  Phone,
+  Sun,
+  HeartPulse,
+  Filter,
+  ChevronRight,
+  Ban,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  ArrowRight,
+  Package,
+} from 'lucide-react';
+import type { Equipment, MaintenanceWorkOrder, TaskPriority } from '@/types';
+import {
+  equipmentList as mockEquipmentList,
+  maintenanceWorkOrders as mockWorkOrders,
+} from '@/data/mockData';
+import { cn } from '@/lib/utils';
+
+type EquipmentTab = 'ledger' | 'workorders' | 'spareparts';
+
+const equipmentCategoryIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  '母婴护理设备': Baby,
+  '监测设备': Activity,
+  '康复设备': HeartPulse,
+  '环境设备': Wind,
+  '办公设备': Cpu,
+};
+
+const equipmentCategoryGradients: Record<string, string> = {
+  '母婴护理设备': 'from-pink-500 to-rose-400',
+  '监测设备': 'from-sky-500 to-blue-400',
+  '康复设备': 'from-violet-500 to-purple-400',
+  '环境设备': 'from-emerald-500 to-green-400',
+  '办公设备': 'from-amber-500 to-orange-400',
+};
+
+const fallbackIcons = [Cpu, Thermometer, Activity, Wind, Bath, Baby, Stethoscope, Scale, Fan, Phone, Sun, HeartPulse];
+
+const statusColors: Record<Equipment['status'], string> = {
+  '正常': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  '使用中': 'bg-blue-100 text-blue-700 border-blue-200',
+  '待维护': 'bg-amber-100 text-amber-700 border-amber-200',
+  '维修中': 'bg-rose-100 text-rose-700 border-rose-200',
+  '已报废': 'bg-slate-100 text-slate-600 border-slate-200',
+};
+
+const workOrderStatusStyles: Record<MaintenanceWorkOrder['status'], { bg: string; text: string; dot: string }> = {
+  '待处理': { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
+  '处理中': { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
+  '已完成': { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  '已延期': { bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500' },
+};
+
+const priorityColors: Record<TaskPriority, string> = {
+  '高': 'bg-rose-100 text-rose-700 border-rose-200',
+  '中': 'bg-amber-100 text-amber-700 border-amber-200',
+  '低': 'bg-slate-100 text-slate-600 border-slate-200',
+};
+
+interface SparePart {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  currentStock: number;
+  safeStock: number;
+  maxStock: number;
+  status: '正常' | '预警' | '紧缺';
+  unitPrice: number;
+  supplier: string;
+  lastRestockDate: string;
+  location: string;
+  compatibleModels: string[];
+}
+
+const mockSpareParts: SparePart[] = [
+  { id: 'SP001', name: '电极片套装', category: '康复设备配件', unit: '套', currentStock: 8, safeStock: 10, maxStock: 30, status: '预警', unitPrice: 580, supplier: '康复医疗配件', lastRestockDate: '2026-05-20', location: '备件库A区-01', compatibleModels: ['REHAB-PLUS-3000'] },
+  { id: 'SP002', name: '排水泵总成', category: '环境设备配件', unit: '个', currentStock: 2, safeStock: 3, maxStock: 10, status: '预警', unitPrice: 1280, supplier: '家电配件商城', lastRestockDate: '2026-05-10', location: '备件库A区-02', compatibleModels: ['MED-WASH-25KG'] },
+  { id: 'SP003', name: '空气净化器滤网', category: '环境设备配件', unit: '套', currentStock: 15, safeStock: 20, maxStock: 50, status: '预警', unitPrice: 320, supplier: '飞利浦授权商', lastRestockDate: '2026-05-25', location: '备件库A区-03', compatibleModels: ['AIR-PURE-X800'] },
+  { id: 'SP004', name: '紫外线消毒灯管', category: '环境设备配件', unit: '支', currentStock: 3, safeStock: 4, maxStock: 15, status: '预警', unitPrice: 180, supplier: '雪莱特官方', lastRestockDate: '2026-04-20', location: '备件库B区-01', compatibleModels: ['UV-DISINFECT-CART'] },
+  { id: 'SP005', name: '婴儿恒温床传感器', category: '母婴护理配件', unit: '个', currentStock: 12, safeStock: 8, maxStock: 25, status: '正常', unitPrice: 450, supplier: '医疗传感器厂家', lastRestockDate: '2026-05-15', location: '备件库B区-02', compatibleModels: ['SMART-CRIB-PRO-V2'] },
+  { id: 'SP006', name: '监护仪导联线', category: '监测设备配件', unit: '套', currentStock: 6, safeStock: 5, maxStock: 15, status: '正常', unitPrice: 680, supplier: '迈瑞医疗配件', lastRestockDate: '2026-05-20', location: '备件库B区-03', compatibleModels: ['ECG-MONITOR-500'] },
+  { id: 'SP007', name: '护理床升降电机', category: '母婴护理配件', unit: '台', currentStock: 1, safeStock: 2, maxStock: 5, status: '紧缺', unitPrice: 2200, supplier: '德国进口配件', lastRestockDate: '2026-03-15', location: '备件库C区-01', compatibleModels: ['NURSE-BED-8000'] },
+  { id: 'SP008', name: '骨盆修复仪气囊', category: '康复设备配件', unit: '套', currentStock: 4, safeStock: 3, maxStock: 10, status: '正常', unitPrice: 850, supplier: '康复设备原厂', lastRestockDate: '2026-05-10', location: '备件库C区-02', compatibleModels: ['PELVIC-RESTORE-X2'] },
+  { id: 'SP009', name: '温度传感器探头', category: '监测设备配件', unit: '个', currentStock: 18, safeStock: 10, maxStock: 30, status: '正常', unitPrice: 120, supplier: '医疗电子配件', lastRestockDate: '2026-06-01', location: '备件库C区-03', compatibleModels: ['TEMP-SCAN-300', 'BODY-SCALE-PRO'] },
+  { id: 'SP010', name: '母乳分析仪试剂', category: '监测设备配件', unit: '盒', currentStock: 2, safeStock: 5, maxStock: 20, status: '紧缺', unitPrice: 980, supplier: '进口医疗试剂', lastRestockDate: '2026-04-25', location: '备件库D区-01', compatibleModels: ['MILK-ANALYZER-PRO'] },
+  { id: 'SP011', name: '中央空调冷媒', category: '环境设备配件', unit: '罐', currentStock: 8, safeStock: 6, maxStock: 20, status: '正常', unitPrice: 450, supplier: '大金官方配件', lastRestockDate: '2026-05-15', location: '备件库D区-02', compatibleModels: ['VRV-SMART-100'] },
+  { id: 'SP012', name: '新生儿蓝光灯管', category: '母婴护理配件', unit: '支', currentStock: 5, safeStock: 4, maxStock: 12, status: '正常', unitPrice: 380, supplier: '医用光学配件', lastRestockDate: '2026-05-20', location: '备件库D区-03', compatibleModels: ['JAUNDICE-LITE-PRO'] },
+];
+
+function TabButton({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  badge?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-medium transition-all duration-200 relative',
+        active
+          ? 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-lg shadow-sky-500/25'
+          : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300 hover:text-sky-600 hover:bg-sky-50/50'
+      )}
+    >
+      <Icon className="w-4 h-4" />
+      {label}
+      {badge !== undefined && badge > 0 && (
+        <span className={cn(
+          'ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold min-w-[18px] text-center',
+          active ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-600'
+        )}>
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function EquipmentLedger() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('全部');
+  const [categoryFilter, setCategoryFilter] = useState<string>('全部');
+
+  const categories = Array.from(new Set(mockEquipmentList.map((e) => e.category)));
+  const statuses: Equipment['status'][] = ['正常', '使用中', '待维护', '维修中', '已报废'];
+
+  const filteredEquipments = mockEquipmentList.filter((eq) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (
+        !eq.name.toLowerCase().includes(q) &&
+        !eq.serialNumber.toLowerCase().includes(q) &&
+        !eq.model.toLowerCase().includes(q)
+      )
+        return false;
+    }
+    if (statusFilter !== '全部' && eq.status !== statusFilter) return false;
+    if (categoryFilter !== '全部' && eq.category !== categoryFilter) return false;
+    return true;
+  });
+
+  const getEquipmentIcon = (equipment: Equipment, index: number) => {
+    const CategoryIcon = equipmentCategoryIcons[equipment.category];
+    if (CategoryIcon) return CategoryIcon;
+    return fallbackIcons[index % fallbackIcons.length];
+  };
+
+  return (
+    <div className="flex-1 overflow-auto bg-slate-50 p-6">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索设备名称/序列号/型号"
+              className="w-72 pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Filter className="w-4 h-4 text-slate-400 mr-1" />
+            <button
+              onClick={() => setCategoryFilter('全部')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                categoryFilter === '全部'
+                  ? 'bg-sky-500 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+              )}
+            >
+              全部类型
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                  categoryFilter === cat
+                    ? 'bg-sky-500 text-white'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+                )}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setStatusFilter('全部')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                statusFilter === '全部'
+                  ? 'bg-sky-500 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+              )}
+            >
+              全部状态
+            </button>
+            {statuses.map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                  statusFilter === s
+                    ? 'bg-sky-500 text-white'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-sky-300 hover:text-sky-600 transition-colors">
+            <RefreshCw className="w-4 h-4" />
+            刷新
+          </button>
+          <button className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-500 text-white rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-sky-500/25 transition-all">
+            <Plus className="w-4 h-4" />
+            新增设备
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+        {filteredEquipments.map((equipment, idx) => {
+          const Icon = getEquipmentIcon(equipment, idx);
+          const usageRatio = (equipment.usageCount / equipment.maxUsageCount) * 100;
+          const isNearThreshold = usageRatio >= 80;
+          const isWarning = equipment.status === '待维护';
+          const gradient = equipmentCategoryGradients[equipment.category] || 'from-slate-500 to-slate-400';
+
+          return (
+            <div
+              key={equipment.id}
+              className={cn(
+                'group bg-white rounded-2xl border overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer',
+                isWarning ? 'border-amber-300 shadow-amber-100/50 shadow-md' : 'border-slate-200'
+              )}
+            >
+              <div className={cn('h-24 bg-gradient-to-br relative overflow-hidden', gradient)}>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Icon className="w-14 h-14 text-white/70" />
+                </div>
+                <div className="absolute top-3 left-3">
+                  <span className="px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-sm text-[10px] font-semibold text-white">
+                    {equipment.category}
+                  </span>
+                </div>
+                <div className="absolute top-3 right-3">
+                  <span className={cn(
+                    'px-2 py-0.5 rounded-full text-[10px] font-semibold border backdrop-blur-sm',
+                    statusColors[equipment.status]
+                  )}>
+                    {equipment.status}
+                  </span>
+                </div>
+                <div className="absolute bottom-2 right-3 opacity-20">
+                  <Icon className="w-20 h-20 text-white" />
+                </div>
+              </div>
+
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <h3 className="text-sm font-bold text-slate-800 group-hover:text-sky-600 transition-colors line-clamp-1">
+                    {equipment.name}
+                  </h3>
+                  {isNearThreshold && (
+                    <div className="shrink-0" title="使用次数接近阈值">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5 mb-4">
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-slate-500">型号:</span>
+                    <span className="text-slate-700 font-mono truncate">{equipment.model}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-slate-500">序列号:</span>
+                    <span className="text-slate-700 font-mono truncate">{equipment.serialNumber}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-slate-500">位置:</span>
+                    <span className="text-slate-700 truncate">{equipment.location}</span>
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] text-slate-500">使用进度</span>
+                    <span className={cn(
+                      'text-[11px] font-semibold',
+                      isNearThreshold ? 'text-amber-600' : 'text-slate-700'
+                    )}>
+                      {equipment.usageCount.toLocaleString()} / {equipment.maxUsageCount.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-all duration-500',
+                        isNearThreshold
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                          : 'bg-gradient-to-r from-sky-500 to-blue-400'
+                      )}
+                      style={{ width: `${Math.min(100, usageRatio)}%` }}
+                    />
+                  </div>
+                  {isNearThreshold && (
+                    <div className="mt-1.5 flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 border border-amber-100">
+                      <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span className="text-[10px] text-amber-700">接近使用寿命阈值，建议检查</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <div className="text-[10px] text-slate-400">
+                    下次维保: {equipment.nextMaintenanceDate}
+                  </div>
+                  <button className="flex items-center gap-0.5 text-[11px] text-sky-600 font-medium hover:text-sky-700 transition-colors">
+                    详情
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function WorkOrders() {
+  const [workOrders, setWorkOrders] = useState(mockWorkOrders);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('全部');
+
+  const filteredOrders = workOrders.filter((wo) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (
+        !wo.equipmentName.toLowerCase().includes(q) &&
+        !wo.title.toLowerCase().includes(q) &&
+        !(wo.assigneeName || '').toLowerCase().includes(q)
+      )
+        return false;
+    }
+    if (statusFilter !== '全部' && wo.status !== statusFilter) return false;
+    return true;
+  });
+
+  const handleStatusChange = (orderId: string, newStatus: MaintenanceWorkOrder['status']) => {
+    setWorkOrders((orders) =>
+      orders.map((wo) => {
+        if (wo.id === orderId) {
+          return { ...wo, status: newStatus };
+        }
+        return wo;
+      })
+    );
+  };
+
+  const getNextActions = (currentStatus: MaintenanceWorkOrder['status']): { label: string; target: MaintenanceWorkOrder['status']; icon: React.ComponentType<{ className?: string }>; style: string }[] => {
+    switch (currentStatus) {
+      case '待处理':
+        return [
+          { label: '开始处理', target: '处理中', icon: ArrowRight, style: 'bg-sky-500 text-white hover:bg-sky-600' },
+        ];
+      case '处理中':
+        return [
+          { label: '完成工单', target: '已完成', icon: CheckCircle2, style: 'bg-emerald-500 text-white hover:bg-emerald-600' },
+        ];
+      case '已延期':
+        return [
+          { label: '开始处理', target: '处理中', icon: ArrowRight, style: 'bg-sky-500 text-white hover:bg-sky-600' },
+        ];
+      default:
+        return [];
+    }
+  };
+
+  const triggerReasons: Record<string, string> = {
+    '故障维修': '设备故障报修',
+    '保养': '达到保养周期',
+    '定期维护': '计划内定期维护',
+  };
+
+  const stats = {
+    pending: workOrders.filter((w) => w.status === '待处理').length,
+    processing: workOrders.filter((w) => w.status === '处理中').length,
+    completed: workOrders.filter((w) => w.status === '已完成').length,
+    delayed: workOrders.filter((w) => w.status === '已延期').length,
+  };
+
+  return (
+    <div className="flex-1 overflow-auto bg-slate-50 p-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+        <div className="bg-gradient-to-br from-amber-500 to-orange-400 rounded-2xl p-5 text-white shadow-lg shadow-amber-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">待处理</div>
+              <div className="text-3xl font-bold mt-1">{stats.pending}</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <Clock className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-sky-500 to-blue-500 rounded-2xl p-5 text-white shadow-lg shadow-sky-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">处理中</div>
+              <div className="text-3xl font-bold mt-1">{stats.processing}</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <Wrench className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-500 to-green-400 rounded-2xl p-5 text-white shadow-lg shadow-emerald-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">已完成</div>
+              <div className="text-3xl font-bold mt-1">{stats.completed}</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-rose-500 to-pink-400 rounded-2xl p-5 text-white shadow-lg shadow-rose-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">已延期</div>
+              <div className="text-3xl font-bold mt-1">{stats.delayed}</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索设备/工单/负责人"
+              className="w-72 pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setStatusFilter('全部')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                statusFilter === '全部'
+                  ? 'bg-sky-500 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+              )}
+            >
+              全部
+            </button>
+            {(['待处理', '处理中', '已完成', '已延期'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                  statusFilter === s
+                    ? 'bg-sky-500 text-white'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-sky-300 hover:text-sky-600 transition-colors">
+            <RefreshCw className="w-4 h-4" />
+            刷新
+          </button>
+          <button className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-500 text-white rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-sky-500/25 transition-all">
+            <Plus className="w-4 h-4" />
+            新建工单
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1100px]">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">工单信息</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">类型/优先级</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">触发原因</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">状态</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">分配人</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">日期</th>
+                <th className="px-5 py-4 text-right text-xs font-semibold text-slate-600">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredOrders.map((wo) => {
+                const statusStyle = workOrderStatusStyles[wo.status];
+                const actions = getNextActions(wo.status);
+                return (
+                  <tr key={wo.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 font-mono">{wo.id}</span>
+                          <span className={cn(
+                            'px-2 py-0.5 rounded-full text-[10px] font-semibold border',
+                            priorityColors[wo.priority]
+                          )}>
+                            {wo.priority}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold text-slate-800 mt-1">{wo.title}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {wo.equipmentName} · {wo.equipmentModel}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-xs font-medium text-slate-700 w-fit">
+                          <Wrench className="w-3 h-3" />
+                          {wo.orderType}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="text-xs text-slate-600 max-w-xs">
+                        {triggerReasons[wo.orderType] || '系统触发'}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className={cn(
+                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border',
+                        statusStyle.bg,
+                        statusStyle.text
+                      )}>
+                        <span className={cn('w-1.5 h-1.5 rounded-full', statusStyle.dot)} />
+                        <span className="text-xs font-semibold">{wo.status}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      {wo.assigneeName ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-sky-100 flex items-center justify-center text-sky-600 text-xs font-bold">
+                            {wo.assigneeName.slice(0, 1)}
+                          </div>
+                          <span className="text-xs font-medium text-slate-700">{wo.assigneeName}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-xs text-slate-400">
+                          <Ban className="w-3 h-3" />
+                          待分配
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="text-xs text-slate-600">
+                        <div className="font-medium text-slate-700">{wo.createTime.split(' ')[0]}</div>
+                        <div className="text-slate-400 mt-0.5">{wo.createTime.split(' ')[1]}</div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {actions.map((action, idx) => {
+                          const ActionIcon = action.icon;
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => handleStatusChange(wo.id, action.target)}
+                              className={cn(
+                                'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm',
+                                action.style
+                              )}
+                            >
+                              <ActionIcon className="w-3 h-3" />
+                              {action.label}
+                            </button>
+                          );
+                        })}
+                        {actions.length === 0 && (
+                          <span className="text-xs text-slate-400">已归档</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SparePartsInventory() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('全部');
+
+  const categories = Array.from(new Set(mockSpareParts.map((p) => p.category)));
+
+  const getRowBgClass = (item: SparePart) => {
+    const ratio = item.currentStock / item.safeStock;
+    if (ratio < 0.5) return 'bg-rose-50 hover:bg-rose-100/80';
+    if (ratio < 1) return 'bg-amber-50 hover:bg-amber-100/80';
+    return 'hover:bg-slate-50';
+  };
+
+  const getStatusBadge = (status: SparePart['status']) => {
+    const styles: Record<SparePart['status'], string> = {
+      '正常': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      '预警': 'bg-amber-100 text-amber-700 border-amber-200',
+      '紧缺': 'bg-rose-100 text-rose-700 border-rose-200',
+    };
+    return styles[status];
+  };
+
+  const filteredItems = mockSpareParts.filter((item) => {
+    if (searchQuery && !item.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (categoryFilter !== '全部' && item.category !== categoryFilter) return false;
+    return true;
+  });
+
+  const stockStats = {
+    normal: mockSpareParts.filter((i) => i.currentStock >= i.safeStock).length,
+    warning: mockSpareParts.filter((i) => i.currentStock < i.safeStock && i.currentStock >= i.safeStock * 0.5).length,
+    critical: mockSpareParts.filter((i) => i.currentStock < i.safeStock * 0.5).length,
+  };
+
+  return (
+    <div className="flex-1 overflow-auto bg-slate-50 p-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        <div className="bg-gradient-to-br from-emerald-500 to-green-400 rounded-2xl p-5 text-white shadow-lg shadow-emerald-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">库存正常</div>
+              <div className="text-3xl font-bold mt-1">{stockStats.normal}</div>
+              <div className="text-xs opacity-80 mt-1">备件充足</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <Boxes className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-amber-500 to-orange-400 rounded-2xl p-5 text-white shadow-lg shadow-amber-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">库存预警</div>
+              <div className="text-3xl font-bold mt-1">{stockStats.warning}</div>
+              <div className="text-xs opacity-80 mt-1">低于安全库存</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-gradient-to-br from-rose-500 to-pink-400 rounded-2xl p-5 text-white shadow-lg shadow-rose-500/20">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm opacity-90">库存紧缺</div>
+              <div className="text-3xl font-bold mt-1">{stockStats.critical}</div>
+              <div className="text-xs opacity-80 mt-1">低于50%安全库存</div>
+            </div>
+            <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索备件名称"
+              className="w-64 pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setCategoryFilter('全部')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                categoryFilter === '全部'
+                  ? 'bg-sky-500 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+              )}
+            >
+              全部
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                  categoryFilter === cat
+                    ? 'bg-sky-500 text-white'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+                )}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:border-sky-300 hover:text-sky-600 transition-colors">
+            <RefreshCw className="w-4 h-4" />
+            刷新库存
+          </button>
+          <button className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-sky-500 to-blue-500 text-white rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-sky-500/25 transition-all">
+            <Plus className="w-4 h-4" />
+            新增备件
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">备件名称</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">分类</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">适用型号</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">当前库存</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">安全库存</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">库存水位</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">状态</th>
+                <th className="px-5 py-4 text-left text-xs font-semibold text-slate-600">存放位置</th>
+                <th className="px-5 py-4 text-right text-xs font-semibold text-slate-600">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredItems.map((item) => {
+                const ratio = Math.min(100, (item.currentStock / Math.max(item.safeStock, 1)) * 100);
+                const isCritical = ratio < 50;
+                const isWarning = ratio >= 50 && ratio < 100;
+                return (
+                  <tr key={item.id} className={cn('transition-colors', getRowBgClass(item))}>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-100 to-blue-100 flex items-center justify-center">
+                          <Package className="w-4.5 h-4.5 text-sky-500" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-slate-800">{item.name}</div>
+                          <div className="text-[11px] text-slate-500">
+                            单价: ¥{item.unitPrice.toLocaleString()} · 供应商: {item.supplier}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className="px-2 py-1 rounded-lg bg-slate-100 text-xs font-medium text-slate-700">
+                        {item.category}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex flex-wrap gap-1">
+                        {item.compatibleModels.map((m, idx) => (
+                          <span key={idx} className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 font-mono">
+                            {m}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className={cn(
+                        'text-sm font-bold',
+                        isCritical ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-slate-800'
+                      )}>
+                        {item.currentStock} <span className="text-xs font-normal text-slate-500">{item.unit}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="text-sm text-slate-700">
+                        {item.safeStock} <span className="text-xs text-slate-500">{item.unit}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4 w-48">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2.5 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              'h-full rounded-full transition-all duration-500',
+                              isCritical
+                                ? 'bg-gradient-to-r from-rose-500 to-pink-500'
+                                : isWarning
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-400'
+                                : 'bg-gradient-to-r from-emerald-500 to-green-400'
+                            )}
+                            style={{ width: `${Math.min(100, ratio)}%` }}
+                          />
+                        </div>
+                        <span className={cn(
+                          'text-xs font-semibold w-10 text-right',
+                          isCritical ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-emerald-600'
+                        )}>
+                          {Math.round(ratio)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className={cn(
+                        'px-2.5 py-1 rounded-full text-xs font-semibold border',
+                        getStatusBadge(item.status)
+                      )}>
+                        {item.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="text-xs text-slate-600">{item.location}</div>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        className={cn(
+                          'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                          isCritical
+                            ? 'bg-rose-500 text-white hover:bg-rose-600 shadow-sm shadow-rose-500/25'
+                            : isWarning
+                            ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm shadow-amber-500/25'
+                            : 'bg-sky-50 text-sky-600 hover:bg-sky-100'
+                        )}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        补货
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Equipment() {
+  const [activeTab, setActiveTab] = useState<EquipmentTab>('ledger');
+
+  return (
+    <div className="h-full flex flex-col bg-slate-50">
+      <div className="px-6 py-4 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <Cpu className="w-6 h-6 text-sky-500" />
+              设备管理
+            </h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              设备台账、维保工单与备件库存一体化管理平台
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 py-4 bg-white border-b border-slate-100 shrink-0">
+        <div className="flex items-center gap-3">
+          <TabButton
+            active={activeTab === 'ledger'}
+            onClick={() => setActiveTab('ledger')}
+            icon={ClipboardList}
+            label="设备台账"
+            badge={mockEquipmentList.length}
+          />
+          <TabButton
+            active={activeTab === 'workorders'}
+            onClick={() => setActiveTab('workorders')}
+            icon={Wrench}
+            label="维保工单"
+            badge={mockWorkOrders.filter((w) => w.status === '待处理' || w.status === '处理中').length}
+          />
+          <TabButton
+            active={activeTab === 'spareparts'}
+            onClick={() => setActiveTab('spareparts')}
+            icon={Boxes}
+            label="备件库存"
+          />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-hidden flex">
+        {activeTab === 'ledger' && <EquipmentLedger />}
+        {activeTab === 'workorders' && <WorkOrders />}
+        {activeTab === 'spareparts' && <SparePartsInventory />}
+      </div>
+    </div>
+  );
+}
