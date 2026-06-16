@@ -13,6 +13,7 @@ import type {
   KPIData,
   AlertNotification,
   StatisticsData,
+  SparePart,
 } from '../types';
 
 const chineseSurnames = [
@@ -493,6 +494,22 @@ export const alertNotifications: AlertNotification[] = [
   { id: 'AL008', type: '设备异常', title: '设备待维护提醒', content: '多功能电动护理床(EQ003)明日(6月20日)到期需维护，请提前安排工单', level: 'warning', relatedId: 'EQ003', read: false, createTime: '2026-06-17 07:50:00' },
   { id: 'AL009', type: '健康预警', title: '新生儿黄疸偏高', content: '客户赵雨萱之女新生儿黄疸指数14.8，建议增加光照治疗并密切观察', level: 'danger', relatedId: 'C007', read: false, createTime: '2026-06-17 07:30:00' },
   { id: 'AL010', type: '设备异常', title: '维保工单延期', content: '产后骨盆修复仪(EQ016)月度保养工单WO005已延期2天，请尽快处理', level: 'warning', relatedId: 'WO005', read: true, createTime: '2026-06-17 07:00:00' },
+];
+
+export const spareParts: SparePart[] = [
+  { id: 'SP001', name: '电极片套装', category: '康复设备配件', unit: '套', currentStock: 8, safeStock: 10, maxStock: 30, status: '预警', unitPrice: 580, supplier: '康复医疗配件', lastRestockDate: '2026-05-20', location: '备件库A区-01', compatibleModels: ['REHAB-PLUS-3000'] },
+  { id: 'SP002', name: '排水泵总成', category: '环境设备配件', unit: '个', currentStock: 2, safeStock: 3, maxStock: 10, status: '预警', unitPrice: 1280, supplier: '家电配件商城', lastRestockDate: '2026-05-10', location: '备件库A区-02', compatibleModels: ['MED-WASH-25KG'] },
+  { id: 'SP003', name: 'HEPA滤网', category: '环境设备配件', unit: '套', currentStock: 15, safeStock: 20, maxStock: 50, status: '预警', unitPrice: 180, supplier: '飞利浦授权商', lastRestockDate: '2026-05-25', location: '备件库A区-03', compatibleModels: ['AIR-PURE-X800'] },
+  { id: 'SP004', name: '活性炭滤网', category: '环境设备配件', unit: '套', currentStock: 15, safeStock: 20, maxStock: 50, status: '预警', unitPrice: 120, supplier: '飞利浦授权商', lastRestockDate: '2026-05-25', location: '备件库A区-03', compatibleModels: ['AIR-PURE-X800'] },
+  { id: 'SP005', name: '紫外线消毒灯管', category: '环境设备配件', unit: '支', currentStock: 3, safeStock: 4, maxStock: 15, status: '预警', unitPrice: 180, supplier: '雪莱特官方', lastRestockDate: '2026-04-20', location: '备件库B区-01', compatibleModels: ['UV-DISINFECT-CART'] },
+  { id: 'SP006', name: '婴儿恒温床传感器', category: '母婴护理配件', unit: '个', currentStock: 12, safeStock: 8, maxStock: 25, status: '正常', unitPrice: 450, supplier: '医疗传感器厂家', lastRestockDate: '2026-05-15', location: '备件库B区-02', compatibleModels: ['SMART-CRIB-PRO-V2'] },
+  { id: 'SP007', name: '监护仪导联线', category: '监测设备配件', unit: '套', currentStock: 6, safeStock: 5, maxStock: 15, status: '正常', unitPrice: 680, supplier: '迈瑞医疗配件', lastRestockDate: '2026-05-20', location: '备件库B区-03', compatibleModels: ['ECG-MONITOR-500'] },
+  { id: 'SP008', name: '护理床升降电机', category: '母婴护理配件', unit: '台', currentStock: 1, safeStock: 2, maxStock: 5, status: '紧缺', unitPrice: 2200, supplier: '德国进口配件', lastRestockDate: '2026-03-15', location: '备件库C区-01', compatibleModels: ['NURSE-BED-8000'] },
+  { id: 'SP009', name: '骨盆修复仪气囊', category: '康复设备配件', unit: '套', currentStock: 4, safeStock: 3, maxStock: 10, status: '正常', unitPrice: 850, supplier: '康复设备原厂', lastRestockDate: '2026-05-10', location: '备件库C区-02', compatibleModels: ['PELVIC-RESTORE-X2'] },
+  { id: 'SP010', name: '温度传感器探头', category: '监测设备配件', unit: '个', currentStock: 18, safeStock: 10, maxStock: 30, status: '正常', unitPrice: 120, supplier: '医疗电子配件', lastRestockDate: '2026-06-01', location: '备件库C区-03', compatibleModels: ['TEMP-SCAN-300', 'BODY-SCALE-PRO'] },
+  { id: 'SP011', name: '母乳分析仪试剂', category: '监测设备配件', unit: '盒', currentStock: 2, safeStock: 5, maxStock: 20, status: '紧缺', unitPrice: 980, supplier: '进口医疗试剂', lastRestockDate: '2026-04-25', location: '备件库D区-01', compatibleModels: ['MILK-ANALYZER-PRO'] },
+  { id: 'SP012', name: '中央空调冷媒', category: '环境设备配件', unit: '罐', currentStock: 8, safeStock: 6, maxStock: 20, status: '正常', unitPrice: 450, supplier: '大金官方配件', lastRestockDate: '2026-05-15', location: '备件库D区-02', compatibleModels: ['VRV-SMART-100'] },
+  { id: 'SP013', name: '新生儿蓝光灯管', category: '母婴护理配件', unit: '支', currentStock: 5, safeStock: 4, maxStock: 12, status: '正常', unitPrice: 380, supplier: '医用光学配件', lastRestockDate: '2026-05-20', location: '备件库D区-03', compatibleModels: ['JAUNDICE-LITE-PRO'] },
 ];
 
 export const statisticsData: StatisticsData[] = [

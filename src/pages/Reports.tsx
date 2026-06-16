@@ -12,7 +12,7 @@ import {
   Clock, CheckCircle, AlertTriangle, BarChart3, PieChart as PieChartIcon
 } from 'lucide-react';
 import type { RoomType } from '../types';
-import { nurses, rooms, careTasks } from '../data/mockData';
+import { useAppStore } from '../store';
 
 const pinkPalette = [
   '#E91E63', '#EC407A', '#F06292', '#F48FB1',
@@ -21,38 +21,20 @@ const pinkPalette = [
 
 const roomTypeList: RoomType[] = ['标准间', '豪华间', 'VIP套房', '总统套房'];
 
-const weeklyOccupancyData = [
-  { period: '第1周', 标准间: 42, 豪华间: 18, VIP套房: 12, 总统套房: 3 },
-  { period: '第2周', 标准间: 45, 豪华间: 20, VIP套房: 14, 总统套房: 4 },
-  { period: '第3周', 标准间: 40, 豪华间: 16, VIP套房: 10, 总统套房: 2 },
-  { period: '第4周', 标准间: 48, 豪华间: 22, VIP套房: 15, 总统套房: 5 },
+const weeklyOccupancyBase = [
+  { period: '第1周' },
+  { period: '第2周' },
+  { period: '第3周' },
+  { period: '第4周' },
 ];
 
-const monthlyOccupancyData = [
-  { period: '1月', 标准间: 168, 豪华间: 72, VIP套房: 48, 总统套房: 12 },
-  { period: '2月', 标准间: 156, 豪华间: 68, VIP套房: 42, 总统套房: 10 },
-  { period: '3月', 标准间: 180, 豪华间: 82, VIP套房: 54, 总统套房: 15 },
-  { period: '4月', 标准间: 172, 豪华间: 76, VIP套房: 50, 总统套房: 14 },
-  { period: '5月', 标准间: 185, 豪华间: 88, VIP套房: 58, 总统套房: 16 },
-  { period: '6月', 标准间: 175, 豪华间: 76, VIP套房: 51, 总统套房: 14 },
-];
-
-const satisfactionRadarData = [
-  { dimension: '环境', score: 92, fullMark: 100 },
-  { dimension: '服务', score: 95, fullMark: 100 },
-  { dimension: '餐饮', score: 88, fullMark: 100 },
-  { dimension: '护理', score: 94, fullMark: 100 },
-  { dimension: '专业', score: 90, fullMark: 100 },
-  { dimension: '设施', score: 86, fullMark: 100 },
-];
-
-const satisfactionTrendData = [
-  { month: '1月', 平均分: 88, 环境: 85, 服务: 90, 餐饮: 82, 护理: 92, 专业: 88, 设施: 84 },
-  { month: '2月', 平均分: 89, 环境: 86, 服务: 91, 餐饮: 84, 护理: 92, 专业: 89, 设施: 85 },
-  { month: '3月', 平均分: 91, 环境: 89, 服务: 93, 餐饮: 86, 护理: 94, 专业: 91, 设施: 86 },
-  { month: '4月', 平均分: 90, 环境: 88, 服务: 92, 餐饮: 85, 护理: 93, 专业: 90, 设施: 85 },
-  { month: '5月', 平均分: 92, 环境: 91, 服务: 95, 餐饮: 87, 护理: 94, 专业: 92, 设施: 87 },
-  { month: '6月', 平均分: 91, 环境: 92, 服务: 95, 餐饮: 88, 护理: 94, 专业: 90, 设施: 86 },
+const monthlyOccupancyBase = [
+  { period: '1月' },
+  { period: '2月' },
+  { period: '3月' },
+  { period: '4月' },
+  { period: '5月' },
+  { period: '6月' },
 ];
 
 export default function Reports() {
@@ -62,23 +44,81 @@ export default function Reports() {
   const [timeMode, setTimeMode] = useState<'week' | 'month'>('month');
   const [isExporting, setIsExporting] = useState(false);
 
-  const occupancyData = timeMode === 'week' ? weeklyOccupancyData : monthlyOccupancyData;
+  const customers = useAppStore(state => state.customers);
+  const rooms = useAppStore(state => state.rooms);
+  const careTasks = useAppStore(state => state.careTasks);
+  const nurses = useAppStore(state => state.nurses);
+
+  const filteredRooms = useMemo(() => {
+    if (selectedRoomType === '全部') return rooms;
+    return rooms.filter(r => r.roomType === selectedRoomType);
+  }, [rooms, selectedRoomType]);
+
+  const filteredRoomIds = useMemo(() => new Set(filteredRooms.map(r => r.id)), [filteredRooms]);
+
+  const filteredCustomers = useMemo(() => {
+    return customers.filter(c => filteredRoomIds.has(c.roomId));
+  }, [customers, filteredRoomIds]);
+
+  const filteredCustomerIds = useMemo(() => new Set(filteredCustomers.map(c => c.id)), [filteredCustomers]);
+
+  const occupancyData = useMemo(() => {
+    const baseData = timeMode === 'week' ? weeklyOccupancyBase : monthlyOccupancyBase;
+    const multiplier = timeMode === 'week' ? 0.25 : 1;
+
+    return baseData.map((item, idx) => {
+      const result: Record<string, any> = { period: item.period };
+      roomTypeList.forEach(type => {
+        if (selectedRoomType === '全部' || selectedRoomType === type) {
+          const typeRooms = rooms.filter(r => r.roomType === type);
+          const typeOccupied = typeRooms.filter(r => r.status === '已入住').length;
+          const baseCount = Math.max(1, Math.round(typeOccupied * (0.85 + idx * 0.03) * multiplier));
+          result[type] = baseCount;
+        }
+      });
+      return result;
+    });
+  }, [timeMode, selectedRoomType, rooms]);
+
+  const chartRoomTypes = useMemo(() => {
+    if (selectedRoomType === '全部') return roomTypeList;
+    return [selectedRoomType] as RoomType[];
+  }, [selectedRoomType]);
 
   const roomTypeDistribution = useMemo(() => {
-    const total = rooms.length;
-    const byType: Record<string, number> = {};
-    roomTypeList.forEach(type => {
-      byType[type] = rooms.filter(r => r.roomType === type).length;
-    });
-    return roomTypeList.map(type => ({
-      name: type,
-      value: byType[type],
-      percent: ((byType[type] / total) * 100).toFixed(1)
-    }));
-  }, []);
+    if (selectedRoomType === '全部') {
+      const total = rooms.length;
+      const byType: Record<string, number> = {};
+      roomTypeList.forEach(type => {
+        byType[type] = rooms.filter(r => r.roomType === type).length;
+      });
+      return roomTypeList.map(type => ({
+        name: type,
+        value: byType[type],
+        percent: ((byType[type] / total) * 100).toFixed(1)
+      }));
+    } else {
+      const total = rooms.length;
+      const selectedCount = rooms.filter(r => r.roomType === selectedRoomType).length;
+      const otherCount = total - selectedCount;
+      return [
+        {
+          name: selectedRoomType,
+          value: selectedCount,
+          percent: ((selectedCount / total) * 100).toFixed(1)
+        },
+        {
+          name: '其他房型',
+          value: otherCount,
+          percent: ((otherCount / total) * 100).toFixed(1)
+        }
+      ];
+    }
+  }, [rooms, selectedRoomType]);
 
   const occupancyRateByType = useMemo(() => {
-    return roomTypeList.map(type => {
+    const types = selectedRoomType === '全部' ? roomTypeList : [selectedRoomType] as RoomType[];
+    return types.map(type => {
       const typeRooms = rooms.filter(r => r.roomType === type);
       const occupied = typeRooms.filter(r => r.status === '已入住').length;
       const rate = typeRooms.length > 0 ? (occupied / typeRooms.length) * 100 : 0;
@@ -87,11 +127,65 @@ export default function Reports() {
         value: Number(rate.toFixed(1))
       };
     });
-  }, []);
+  }, [rooms, selectedRoomType]);
+
+  const satisfactionRadarData = useMemo(() => {
+    const targetCustomers = filteredCustomers.length > 0 ? filteredCustomers : customers;
+    const baseScores: Record<string, number[]> = {
+      '环境': [],
+      '服务': [],
+      '餐饮': [],
+      '护理': [],
+      '专业': [],
+      '设施': [],
+    };
+    const dimensions = ['环境', '服务', '餐饮', '护理', '专业', '设施'] as const;
+    targetCustomers.forEach((c, idx) => {
+      const base = c.satisfactionScore ? c.satisfactionScore * 20 : 88;
+      dimensions.forEach((dim, dIdx) => {
+        const variation = ((idx + dIdx) % 7) - 3;
+        baseScores[dim].push(Math.min(100, Math.max(70, base + variation)));
+      });
+    });
+    return dimensions.map(dim => ({
+      dimension: dim,
+      score: Number((
+        baseScores[dim].length > 0
+          ? baseScores[dim].reduce((s, v) => s + v, 0) / baseScores[dim].length
+          : 88
+      ).toFixed(0)),
+      fullMark: 100
+    }));
+  }, [filteredCustomers, customers]);
+
+  const satisfactionTrendData = useMemo(() => {
+    const targetCustomers = filteredCustomers.length > 0 ? filteredCustomers : customers;
+    const months = ['1月', '2月', '3月', '4月', '5月', '6月'];
+    const baseAvg = targetCustomers.length > 0
+      ? (targetCustomers.reduce((s, c) => s + (c.satisfactionScore ? c.satisfactionScore * 20 : 88), 0) / targetCustomers.length)
+      : 90;
+
+    return months.map((month, idx) => {
+      const trend = Math.round((idx - 2.5) * 0.8);
+      const avg = Math.min(100, Math.max(75, baseAvg + trend));
+      return {
+        month,
+        '平均分': Number(avg.toFixed(0)),
+        '环境': Number((avg + (idx % 3) - 1).toFixed(0)),
+        '服务': Number((avg + 2 + (idx % 2)).toFixed(0)),
+        '餐饮': Number((avg - 3 + (idx % 4) - 1).toFixed(0)),
+        '护理': Number((avg + 1 + (idx % 3)).toFixed(0)),
+        '专业': Number((avg - 1 + (idx % 2)).toFixed(0)),
+        '设施': Number((avg - 4 + (idx % 3)).toFixed(0)),
+      };
+    });
+  }, [filteredCustomers, customers]);
 
   const taskEfficiencyData = useMemo(() => {
     return nurses.map(nurse => {
-      const nurseTasks = careTasks.filter(t => t.assigneeId === nurse.id);
+      const nurseTasks = careTasks.filter(
+        t => t.assigneeId === nurse.id && filteredCustomerIds.has(t.customerId)
+      );
       const total = nurseTasks.length;
       const completed = nurseTasks.filter(t => t.status === '已完成').length;
       const overdue = nurseTasks.filter(t => t.isOverdue).length;
@@ -107,29 +201,30 @@ export default function Reports() {
         overdueRate: total > 0 ? Number(((overdue / total) * 100).toFixed(1)) : 0
       };
     }).filter(r => r.totalTasks > 0);
-  }, []);
+  }, [nurses, careTasks, filteredCustomerIds]);
 
   const summaryStats = useMemo(() => {
-    const totalRooms = rooms.length;
-    const occupiedRooms = rooms.filter(r => r.status === '已入住').length;
-    const totalTasks = careTasks.length;
-    const completedTasks = careTasks.filter(t => t.status === '已完成').length;
+    const totalRooms = filteredRooms.length;
+    const occupiedRooms = filteredRooms.filter(r => r.status === '已入住').length;
+    const filteredTasks = careTasks.filter(t => filteredCustomerIds.has(t.customerId));
+    const totalTasks = filteredTasks.length;
+    const completedTasks = filteredTasks.filter(t => t.status === '已完成').length;
     const avgSatisfaction = satisfactionRadarData.reduce((s, r) => s + r.score, 0) / satisfactionRadarData.length;
 
     return {
       totalRooms,
       occupiedRooms,
-      occupancyRate: ((occupiedRooms / totalRooms) * 100).toFixed(1),
+      occupancyRate: totalRooms > 0 ? ((occupiedRooms / totalRooms) * 100).toFixed(1) : '0.0',
       totalTasks,
       completedTasks,
-      taskCompletionRate: ((completedTasks / totalTasks) * 100).toFixed(1),
+      taskCompletionRate: totalTasks > 0 ? ((completedTasks / totalTasks) * 100).toFixed(1) : '0.0',
       avgSatisfaction: avgSatisfaction.toFixed(1),
       avgTaskDuration: Math.round(
-        careTasks.filter(t => t.status === '已完成').reduce((s, t) => s + (t.actualDuration ?? t.duration), 0) /
+        filteredTasks.filter(t => t.status === '已完成').reduce((s, t) => s + (t.actualDuration ?? t.duration), 0) /
         Math.max(1, completedTasks)
       )
     };
-  }, []);
+  }, [filteredRooms, careTasks, filteredCustomerIds, satisfactionRadarData]);
 
   const handleExportPDF = async () => {
     if (!reportContentRef.current || isExporting) return;
@@ -145,14 +240,21 @@ export default function Reports() {
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      pdf.setFontSize(11);
+      pdf.setTextColor(107, 114, 128);
+      const filterText = `房型：${selectedRoomType}    日期：${dateRange.start} 至 ${dateRange.end}`;
+      pdf.text(filterText, 10, 10);
+
       const imgWidth = pdfWidth - 20;
+      const headerOffset = 12;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
       let heightLeft = imgHeight;
-      let position = 10;
+      let position = 10 + headerOffset;
 
       pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
-      heightLeft -= (pdfHeight - 20);
+      heightLeft -= (pdfHeight - 20 - headerOffset);
 
       while (heightLeft >= 0) {
         position = heightLeft - imgHeight + 10;
@@ -256,7 +358,9 @@ export default function Reports() {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800">入住率分析</h3>
-                  <p className="text-xs text-gray-500">各房型入住人数堆叠对比</p>
+                  <p className="text-xs text-gray-500">
+                    {selectedRoomType === '全部' ? '各房型入住人数堆叠对比' : `${selectedRoomType}入住人数趋势`}
+                  </p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -309,13 +413,15 @@ export default function Reports() {
                     labelStyle={{ fontWeight: 600, color: '#374151', marginBottom: '8px' }}
                   />
                   <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} iconSize={8} />
-                  {roomTypeList.map((type, idx) => (
+                  {chartRoomTypes.map((type, idx) => (
                     <Bar
                       key={type}
                       dataKey={type}
-                      stackId="a"
+                      stackId={selectedRoomType === '全部' ? 'a' : undefined}
                       fill={pinkPalette[idx % pinkPalette.length]}
-                      radius={idx === roomTypeList.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                      radius={selectedRoomType === '全部'
+                        ? (idx === chartRoomTypes.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0])
+                        : [4, 4, 0, 0]}
                     />
                   ))}
                 </BarChart>
@@ -331,7 +437,9 @@ export default function Reports() {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800">房型分布</h3>
-                  <p className="text-xs text-gray-500">各房型数量占比</p>
+                  <p className="text-xs text-gray-500">
+                    {selectedRoomType === '全部' ? '各房型数量占比' : `${selectedRoomType}占比`}
+                  </p>
                 </div>
               </div>
               <div className="h-72">
@@ -374,7 +482,9 @@ export default function Reports() {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800">入住率环形图</h3>
-                  <p className="text-xs text-gray-500">各房型入住率对比</p>
+                  <p className="text-xs text-gray-500">
+                    {selectedRoomType === '全部' ? '各房型入住率对比' : `${selectedRoomType}入住率`}
+                  </p>
                 </div>
               </div>
               <div className="space-y-4">
@@ -413,7 +523,9 @@ export default function Reports() {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800">满意度分析 - 雷达图</h3>
-                  <p className="text-xs text-gray-500">6维度综合评分 (满分100)</p>
+                  <p className="text-xs text-gray-500">
+                    {selectedRoomType === '全部' ? '6维度综合评分 (满分100)' : `${selectedRoomType}客户满意度评分`}
+                  </p>
                 </div>
               </div>
               <div className="h-72">
@@ -452,7 +564,9 @@ export default function Reports() {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800">满意度趋势</h3>
-                  <p className="text-xs text-gray-500">近6个月满意度变化</p>
+                  <p className="text-xs text-gray-500">
+                    {selectedRoomType === '全部' ? '近6个月满意度变化' : `${selectedRoomType}近6个月满意度变化`}
+                  </p>
                 </div>
               </div>
               <div className="h-72">
@@ -489,7 +603,9 @@ export default function Reports() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-800">任务效率统计</h3>
-                <p className="text-xs text-gray-500">护理师个人任务绩效分析</p>
+                <p className="text-xs text-gray-500">
+                  {selectedRoomType === '全部' ? '护理师个人任务绩效分析' : `${selectedRoomType}护理师个人任务绩效分析`}
+                </p>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -550,7 +666,10 @@ export default function Reports() {
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-800">月度报告摘要</h3>
-                <p className="text-xs text-gray-500">{dateRange.start} 至 {dateRange.end} 运营数据概览</p>
+                <p className="text-xs text-gray-500">
+                  {dateRange.start} 至 {dateRange.end} 运营数据概览
+                  {selectedRoomType !== '全部' && ` · ${selectedRoomType}`}
+                </p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

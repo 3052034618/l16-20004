@@ -23,7 +23,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import type { CareTask, TaskStatus, Nurse, TaskPriority } from '@/types';
-import { careTasks as mockTasks, nurses as mockNurses } from '@/data/mockData';
+import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 type KanbanStatus = '待执行' | '进行中' | '已完成';
@@ -56,6 +56,16 @@ const priorityStyles: Record<TaskPriority, string> = {
   '中': 'bg-amber-100 text-amber-700 border-amber-200',
   '低': 'bg-slate-100 text-slate-600 border-slate-200',
 };
+
+function formatDateTime(date: Date): string {
+  const y = date.getFullYear();
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const d = date.getDate().toString().padStart(2, '0');
+  const hh = date.getHours().toString().padStart(2, '0');
+  const mm = date.getMinutes().toString().padStart(2, '0');
+  const ss = date.getSeconds().toString().padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+}
 
 function Avatar({ name, size = 'sm' }: { name: string; size?: 'sm' | 'md' }) {
   const colors = [
@@ -207,7 +217,7 @@ function TaskCard({
 }
 
 export default function Tasks() {
-  const [tasks, setTasks] = useState<CareTask[]>(mockTasks);
+  const { careTasks: tasks, nurses, updateCareTask } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [nurseFilter, setNurseFilter] = useState<NurseFilter>('全部');
   const [taskTypeFilter, setTaskTypeFilter] = useState<TaskTypeFilter>('全部');
@@ -215,7 +225,7 @@ export default function Tasks() {
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | '全部'>('全部');
   const [drag, setDrag] = useState<DragState>({ taskId: null, fromColumn: null, overColumn: null });
 
-  const getNurse = (id?: string) => mockNurses.find(n => n.id === id);
+  const getNurse = (id?: string) => nurses.find(n => n.id === id);
 
   const getColumnStatus = (taskStatus: TaskStatus): KanbanStatus => {
     if (taskStatus === '已完成') return '已完成';
@@ -272,21 +282,19 @@ export default function Tasks() {
 
   const handleDragEnd = () => {
     if (drag.taskId && drag.overColumn && drag.overColumn !== drag.fromColumn) {
-      setTasks(prev => prev.map(t => {
-        if (t.id !== drag.taskId) return t;
-        const newStatus: TaskStatus = drag.overColumn === '已完成'
-          ? '已完成'
-          : drag.overColumn === '进行中'
-          ? '进行中'
-          : '待执行';
-        return {
-          ...t,
-          status: newStatus,
-          isOverdue: newStatus === '已完成' ? false : t.isOverdue,
-          endTime: newStatus === '已完成' ? new Date().toISOString().slice(0, 19).replace('T', ' ') : undefined,
-          completeTime: newStatus === '已完成' ? new Date().toISOString().slice(0, 19).replace('T', ' ') : undefined,
-        };
-      }));
+      const newStatus: TaskStatus = drag.overColumn === '已完成'
+        ? '已完成'
+        : drag.overColumn === '进行中'
+        ? '进行中'
+        : '待执行';
+      const now = formatDateTime(new Date());
+      updateCareTask(drag.taskId, {
+        status: newStatus,
+        isOverdue: newStatus === '已完成' ? false : tasks.find(t => t.id === drag.taskId)?.isOverdue || false,
+        startTime: newStatus === '进行中' || newStatus === '已完成' ? (tasks.find(t => t.id === drag.taskId)?.startTime || now) : undefined,
+        endTime: newStatus === '已完成' ? now : undefined,
+        completeTime: newStatus === '已完成' ? now : undefined,
+      });
     }
     setDrag({ taskId: null, fromColumn: null, overColumn: null });
   };
@@ -360,7 +368,7 @@ export default function Tasks() {
               className="w-40 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 appearance-none bg-white cursor-pointer"
             >
               <option value="全部">全部护理师</option>
-              {mockNurses.map(n => (
+              {nurses.map(n => (
                 <option key={n.id} value={n.id}>{n.name} · {n.nurseLevel}</option>
               ))}
             </select>

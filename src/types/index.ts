@@ -312,6 +312,22 @@ export interface MaintenanceWorkOrder {
   remark?: string;
 }
 
+export interface SparePart {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  currentStock: number;
+  safeStock: number;
+  maxStock: number;
+  status: '正常' | '预警' | '紧缺';
+  unitPrice: number;
+  supplier: string;
+  lastRestockDate: string;
+  location: string;
+  compatibleModels: string[];
+}
+
 export interface Room {
   id: string;
   floor: number;

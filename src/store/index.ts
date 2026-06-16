@@ -11,6 +11,7 @@ import type {
   Equipment,
   MaintenanceWorkOrder,
   Room,
+  SparePart,
 } from '@/types';
 import {
   customers as initialCustomers,
@@ -24,6 +25,7 @@ import {
   equipmentList as initialEquipment,
   maintenanceWorkOrders as initialMaintenanceWorkOrders,
   rooms as initialRooms,
+  spareParts as initialSpareParts,
 } from '@/data/mockData';
 
 interface AppState {
@@ -37,6 +39,7 @@ interface AppState {
   inventoryItems: InventoryItem[];
   equipment: Equipment[];
   maintenanceWorkOrders: MaintenanceWorkOrder[];
+  spareParts: SparePart[];
   rooms: Room[];
 
   addCustomer: (customer: Customer) => void;
@@ -79,6 +82,10 @@ interface AppState {
   updateMaintenanceWorkOrder: (id: string, data: Partial<MaintenanceWorkOrder>) => void;
   deleteMaintenanceWorkOrder: (id: string) => void;
 
+  addSparePart: (part: SparePart) => void;
+  updateSparePart: (id: string, data: Partial<SparePart>) => void;
+  deleteSparePart: (id: string) => void;
+
   addRoom: (room: Room) => void;
   updateRoom: (id: string, data: Partial<Room>) => void;
   deleteRoom: (id: string) => void;
@@ -95,6 +102,7 @@ export const useAppStore = create<AppState>((set) => ({
   inventoryItems: initialInventoryItems,
   equipment: initialEquipment,
   maintenanceWorkOrders: initialMaintenanceWorkOrders,
+  spareParts: initialSpareParts,
   rooms: initialRooms,
 
   addCustomer: (customer) => set((state) => ({ customers: [...state.customers, customer] })),
@@ -175,6 +183,14 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   deleteMaintenanceWorkOrder: (id) => set((state) => ({
     maintenanceWorkOrders: state.maintenanceWorkOrders.filter((o) => o.id !== id),
+  })),
+
+  addSparePart: (part) => set((state) => ({ spareParts: [...state.spareParts, part] })),
+  updateSparePart: (id, data) => set((state) => ({
+    spareParts: state.spareParts.map((p) => (p.id === id ? { ...p, ...data } : p)),
+  })),
+  deleteSparePart: (id) => set((state) => ({
+    spareParts: state.spareParts.filter((p) => p.id !== id),
   })),
 
   addRoom: (room) => set((state) => ({ rooms: [...state.rooms, room] })),

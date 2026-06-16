@@ -22,9 +22,12 @@ import {
   FileText,
   Star,
   AlertCircle,
+  Send,
+  Edit3,
+  X,
 } from 'lucide-react';
 import type { CarePlan, CarePlanStatus, Nurse, CareTask } from '@/types';
-import { carePlans as mockCarePlans, nurses as mockNurses, customers as mockCustomers } from '@/data/mockData';
+import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 type StatusFilter = CarePlanStatus | '全部';
@@ -93,12 +96,16 @@ function CarePlanCard({
   plan,
   selected,
   onClick,
+  getCustomer,
+  nurses,
 }: {
   plan: CarePlan;
   selected: boolean;
   onClick: () => void;
+  getCustomer: (id: string) => ReturnType<typeof useAppStore.getState>['customers'][number] | undefined;
+  nurses: Nurse[];
 }) {
-  const customer = mockCustomers.find(c => c.id === plan.customerId);
+  const customer = getCustomer(plan.customerId);
 
   return (
     <div
@@ -146,7 +153,7 @@ function CarePlanCard({
 
       <div className="mt-2.5 flex -space-x-1.5">
         {plan.assignedNurseIds.slice(0, 3).map((nid, i) => {
-          const nurse = mockNurses.find(n => n.id === nid);
+          const nurse = nurses.find(n => n.id === nid);
           return nurse ? (
             <Avatar key={nid + i} name={nurse.name} size="sm" />
           ) : null;
@@ -227,16 +234,112 @@ function NurseCard({ nurse, score }: { nurse: Nurse; score: number }) {
   );
 }
 
+function AdjustDialog({
+  open,
+  onClose,
+  onSubmit,
+  taskName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => void;
+  taskName: string;
+}) {
+  const [reason, setReason] = useState('');
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center">
+              <Edit3 className="w-4 h-4 text-sky-600" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800">申请调整任务</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="mb-4 px-3 py-2 bg-slate-50 rounded-lg">
+          <div className="text-xs text-slate-500">任务名称</div>
+          <div className="text-sm font-medium text-slate-700 mt-0.5">{taskName}</div>
+        </div>
+
+        <div className="mb-5">
+          <label className="block text-xs font-medium text-slate-600 mb-2 flex items-center gap-1.5">
+            <MessageSquare className="w-3.5 h-3.5 text-sky-500" />
+            调整原因
+          </label>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            rows={4}
+            placeholder="请详细说明调整原因..."
+            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 resize-none"
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl font-medium text-sm hover:bg-slate-50 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => {
+              if (reason.trim()) {
+                onSubmit(reason.trim());
+                setReason('');
+              }
+            }}
+            disabled={!reason.trim()}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-sky-500 to-blue-500 hover:from-sky-600 hover:to-blue-600 text-white rounded-xl font-medium text-sm shadow-lg shadow-sky-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Send className="w-4 h-4" />
+            提交调整
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CarePlans() {
-  const [carePlans, setCarePlans] = useState<CarePlan[]>(mockCarePlans);
-  const [selectedId, setSelectedId] = useState<string | null>(mockCarePlans[0]?.id || null);
+  const {
+    carePlans,
+    nurses,
+    customers,
+    careTasks,
+    updateCarePlan,
+    addCareTask,
+    updateCareTask,
+  } = useAppStore();
+
+  const [selectedId, setSelectedId] = useState<string | null>(carePlans[0]?.id || null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('全部');
   const [searchQuery, setSearchQuery] = useState('');
   const [isAlgLoading, setIsAlgLoading] = useState(false);
   const [approvalComment, setApprovalComment] = useState('');
   const [showHistory, setShowHistory] = useState(true);
+  const [adjustDialog, setAdjustDialog] = useState<{ open: boolean; taskId: string | null; taskName: string }>({
+    open: false,
+    taskId: null,
+    taskName: '',
+  });
 
   const selectedPlan = carePlans.find(p => p.id === selectedId);
+
+  const getCustomer = (id: string) => customers.find(c => c.id === id);
+  const getNurse = (id?: string) => nurses.find(n => n.id === id);
 
   const filteredPlans = useMemo(() => {
     return carePlans.filter(p => {
@@ -277,29 +380,106 @@ export default function CarePlans() {
     return groups;
   }, [selectedPlan]);
 
+  const formatDateTime = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = (date.getMonth() + 1).toString().padStart(2, '0');
+    const d = date.getDate().toString().padStart(2, '0');
+    const hh = date.getHours().toString().padStart(2, '0');
+    const mm = date.getMinutes().toString().padStart(2, '0');
+    const ss = date.getSeconds().toString().padStart(2, '0');
+    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+  };
+
   const handleApprovalAction = (action: '通过' | '驳回' | '调整') => {
     if (!selectedPlan) return;
     const newStatus: CarePlanStatus = action === '通过' ? '已通过' : action === '驳回' ? '已驳回' : '已调整';
+    const operateTime = formatDateTime(new Date());
     const newRecord = {
       id: `AH-new-${Date.now()}`,
       operatorId: 'HM001',
       operatorName: '张桂兰护士长',
       action,
       comment: approvalComment || undefined,
-      operateTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      operateTime,
     };
-    setCarePlans(prev => prev.map(p => p.id === selectedPlan.id ? {
-      ...p,
+
+    updateCarePlan(selectedPlan.id, {
       status: newStatus,
-      approvedBy: action === '通过' ? '张桂兰护士长' : p.approvedBy,
-      approvalHistory: [...p.approvalHistory, newRecord],
-      updateTime: newRecord.operateTime,
-    } : p));
+      approvedBy: action === '通过' ? '张桂兰护士长' : selectedPlan.approvedBy,
+      approvalHistory: [...selectedPlan.approvalHistory, newRecord],
+      updateTime: operateTime,
+    });
+
+    if (action === '通过') {
+      const assigneeNurseId = selectedPlan.assignedNurseIds[0];
+      const assigneeNurse = getNurse(assigneeNurseId);
+      const today = new Date();
+      const times = ['08:00', '09:30', '11:00', '14:00', '15:30', '17:00', '19:00', '20:30'];
+
+      selectedPlan.tasks.forEach((taskTpl, idx) => {
+        const timeStr = times[idx % times.length];
+        const scheduledTime = `${formatDateTime(today).slice(0, 10)} ${timeStr}:00`;
+        const newCareTask: CareTask = {
+          id: `T-new-${Date.now()}-${idx}`,
+          customerId: selectedPlan.customerId,
+          customerName: selectedPlan.customerName,
+          roomNumber: selectedPlan.roomNumber,
+          carePlanId: selectedPlan.id,
+          templateId: taskTpl.id,
+          taskName: taskTpl.taskName,
+          description: taskTpl.description,
+          category: taskTpl.category,
+          assigneeId: assigneeNurse?.id,
+          assigneeName: assigneeNurse?.name,
+          scheduledTime,
+          status: '待执行',
+          priority: taskTpl.priority || '中',
+          duration: taskTpl.duration || 20,
+          isOverdue: false,
+          createTime: formatDateTime(new Date()),
+        };
+        addCareTask(newCareTask);
+      });
+    }
+
     setApprovalComment('');
+  };
+
+  const handleTaskAccept = (taskId: string) => {
+    updateCareTask(taskId, {
+      status: '进行中',
+      startTime: formatDateTime(new Date()),
+    });
+  };
+
+  const handleTaskAdjustSubmit = (taskId: string, reason: string) => {
+    if (!selectedPlan) return;
+    const operateTime = formatDateTime(new Date());
+    const newRecord = {
+      id: `AH-new-${Date.now()}`,
+      operatorId: selectedPlan.assignedNurseIds[0] || 'N001',
+      operatorName: getNurse(selectedPlan.assignedNurseIds[0])?.name || '护理师',
+      action: '调整' as const,
+      comment: reason,
+      operateTime,
+    };
+    updateCarePlan(selectedPlan.id, {
+      status: '已调整',
+      approvalHistory: [...selectedPlan.approvalHistory, newRecord],
+      updateTime: operateTime,
+    });
+    setAdjustDialog({ open: false, taskId: null, taskName: '' });
   };
 
   return (
     <div className="h-full flex flex-col -m-6">
+      <AdjustDialog
+        open={adjustDialog.open}
+        taskName={adjustDialog.taskName}
+        onClose={() => setAdjustDialog({ open: false, taskId: null, taskName: '' })}
+        onSubmit={(reason) => adjustDialog.taskId && handleTaskAdjustSubmit(adjustDialog.taskId, reason)}
+      />
+
       <div className="px-6 py-4 bg-white border-b border-slate-200 shrink-0">
         <div className="flex items-center justify-between">
           <div>
@@ -377,6 +557,8 @@ export default function CarePlans() {
                 plan={plan}
                 selected={selectedId === plan.id}
                 onClick={() => setSelectedId(plan.id)}
+                getCustomer={getCustomer}
+                nurses={nurses}
               />
             ))}
             {filteredPlans.length === 0 && (
@@ -517,7 +699,7 @@ export default function CarePlans() {
                 </div>
                 <div className="p-5 grid grid-cols-2 gap-3">
                   {selectedPlan.assignedNurseIds.map((nid, i) => {
-                    const nurse = mockNurses.find(n => n.id === nid);
+                    const nurse = nurses.find(n => n.id === nid);
                     if (!nurse) return null;
                     const baseScore = 85 + (nurse.yearsOfExperience * 0.8) + (nurse.nurseLevel === '主管护师' ? 8 : nurse.nurseLevel === '高级' ? 5 : nurse.nurseLevel === '中级' ? 3 : 0);
                     return (
@@ -552,23 +734,51 @@ export default function CarePlans() {
                           <div className="flex-1 h-px bg-slate-100 ml-3" />
                         </div>
                         <div className="grid grid-cols-2 gap-2 ml-9">
-                          {tasks.map(task => (
-                            <div
-                              key={task.id}
-                              className="p-3 rounded-xl bg-slate-50 border border-slate-100 hover:bg-pink-50 hover:border-pink-100 transition-colors"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-slate-800 text-sm truncate">{task.taskName}</div>
-                                  <div className="mt-1 text-[11px] text-slate-500 line-clamp-1">{task.description}</div>
+                          {tasks.map(task => {
+                            const canShowActions = task.status === '待执行' && task.assigneeId && task.assigneeName;
+                            return (
+                              <div
+                                key={task.id}
+                                className="p-3 rounded-xl bg-slate-50 border border-slate-100 hover:bg-pink-50 hover:border-pink-100 transition-colors"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-slate-800 text-sm truncate">{task.taskName}</div>
+                                    <div className="mt-1 text-[11px] text-slate-500 line-clamp-1">{task.description}</div>
+                                  </div>
+                                  <div className="shrink-0 text-right">
+                                    <div className="text-[10px] text-slate-400">时长</div>
+                                    <div className="text-xs font-semibold text-slate-700">{task.duration}分钟</div>
+                                  </div>
                                 </div>
-                                <div className="shrink-0 text-right">
-                                  <div className="text-[10px] text-slate-400">时长</div>
-                                  <div className="text-xs font-semibold text-slate-700">{task.duration}分钟</div>
-                                </div>
+
+                                {canShowActions && (
+                                  <div className="mt-3 pt-3 border-t border-slate-200/60 flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleTaskAccept(task.id);
+                                      }}
+                                      className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-sky-500 to-blue-500 hover:from-sky-600 hover:to-blue-600 text-white rounded-lg text-xs font-medium shadow-sm transition-all"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      确认接收
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setAdjustDialog({ open: true, taskId: task.id, taskName: task.taskName });
+                                      }}
+                                      className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-xs font-medium shadow-sm transition-all"
+                                    >
+                                      <Edit3 className="w-3 h-3" />
+                                      申请调整
+                                    </button>
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );

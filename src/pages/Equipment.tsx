@@ -28,11 +28,8 @@ import {
   ArrowRight,
   Package,
 } from 'lucide-react';
-import type { Equipment, MaintenanceWorkOrder, TaskPriority } from '@/types';
-import {
-  equipmentList as mockEquipmentList,
-  maintenanceWorkOrders as mockWorkOrders,
-} from '@/data/mockData';
+import type { Equipment, MaintenanceWorkOrder, TaskPriority, SparePart } from '@/types';
+import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 type EquipmentTab = 'ledger' | 'workorders' | 'spareparts';
@@ -76,36 +73,14 @@ const priorityColors: Record<TaskPriority, string> = {
   '低': 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
-interface SparePart {
-  id: string;
-  name: string;
-  category: string;
-  unit: string;
-  currentStock: number;
-  safeStock: number;
-  maxStock: number;
-  status: '正常' | '预警' | '紧缺';
-  unitPrice: number;
-  supplier: string;
-  lastRestockDate: string;
-  location: string;
-  compatibleModels: string[];
+function formatDateTime(date: Date): string {
+  const y = date.getFullYear();
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const d = date.getDate().toString().padStart(2, '0');
+  const h = date.getHours().toString().padStart(2, '0');
+  const min = date.getMinutes().toString().padStart(2, '0');
+  return `${y}-${m}-${d} ${h}:${min}:00`;
 }
-
-const mockSpareParts: SparePart[] = [
-  { id: 'SP001', name: '电极片套装', category: '康复设备配件', unit: '套', currentStock: 8, safeStock: 10, maxStock: 30, status: '预警', unitPrice: 580, supplier: '康复医疗配件', lastRestockDate: '2026-05-20', location: '备件库A区-01', compatibleModels: ['REHAB-PLUS-3000'] },
-  { id: 'SP002', name: '排水泵总成', category: '环境设备配件', unit: '个', currentStock: 2, safeStock: 3, maxStock: 10, status: '预警', unitPrice: 1280, supplier: '家电配件商城', lastRestockDate: '2026-05-10', location: '备件库A区-02', compatibleModels: ['MED-WASH-25KG'] },
-  { id: 'SP003', name: '空气净化器滤网', category: '环境设备配件', unit: '套', currentStock: 15, safeStock: 20, maxStock: 50, status: '预警', unitPrice: 320, supplier: '飞利浦授权商', lastRestockDate: '2026-05-25', location: '备件库A区-03', compatibleModels: ['AIR-PURE-X800'] },
-  { id: 'SP004', name: '紫外线消毒灯管', category: '环境设备配件', unit: '支', currentStock: 3, safeStock: 4, maxStock: 15, status: '预警', unitPrice: 180, supplier: '雪莱特官方', lastRestockDate: '2026-04-20', location: '备件库B区-01', compatibleModels: ['UV-DISINFECT-CART'] },
-  { id: 'SP005', name: '婴儿恒温床传感器', category: '母婴护理配件', unit: '个', currentStock: 12, safeStock: 8, maxStock: 25, status: '正常', unitPrice: 450, supplier: '医疗传感器厂家', lastRestockDate: '2026-05-15', location: '备件库B区-02', compatibleModels: ['SMART-CRIB-PRO-V2'] },
-  { id: 'SP006', name: '监护仪导联线', category: '监测设备配件', unit: '套', currentStock: 6, safeStock: 5, maxStock: 15, status: '正常', unitPrice: 680, supplier: '迈瑞医疗配件', lastRestockDate: '2026-05-20', location: '备件库B区-03', compatibleModels: ['ECG-MONITOR-500'] },
-  { id: 'SP007', name: '护理床升降电机', category: '母婴护理配件', unit: '台', currentStock: 1, safeStock: 2, maxStock: 5, status: '紧缺', unitPrice: 2200, supplier: '德国进口配件', lastRestockDate: '2026-03-15', location: '备件库C区-01', compatibleModels: ['NURSE-BED-8000'] },
-  { id: 'SP008', name: '骨盆修复仪气囊', category: '康复设备配件', unit: '套', currentStock: 4, safeStock: 3, maxStock: 10, status: '正常', unitPrice: 850, supplier: '康复设备原厂', lastRestockDate: '2026-05-10', location: '备件库C区-02', compatibleModels: ['PELVIC-RESTORE-X2'] },
-  { id: 'SP009', name: '温度传感器探头', category: '监测设备配件', unit: '个', currentStock: 18, safeStock: 10, maxStock: 30, status: '正常', unitPrice: 120, supplier: '医疗电子配件', lastRestockDate: '2026-06-01', location: '备件库C区-03', compatibleModels: ['TEMP-SCAN-300', 'BODY-SCALE-PRO'] },
-  { id: 'SP010', name: '母乳分析仪试剂', category: '监测设备配件', unit: '盒', currentStock: 2, safeStock: 5, maxStock: 20, status: '紧缺', unitPrice: 980, supplier: '进口医疗试剂', lastRestockDate: '2026-04-25', location: '备件库D区-01', compatibleModels: ['MILK-ANALYZER-PRO'] },
-  { id: 'SP011', name: '中央空调冷媒', category: '环境设备配件', unit: '罐', currentStock: 8, safeStock: 6, maxStock: 20, status: '正常', unitPrice: 450, supplier: '大金官方配件', lastRestockDate: '2026-05-15', location: '备件库D区-02', compatibleModels: ['VRV-SMART-100'] },
-  { id: 'SP012', name: '新生儿蓝光灯管', category: '母婴护理配件', unit: '支', currentStock: 5, safeStock: 4, maxStock: 12, status: '正常', unitPrice: 380, supplier: '医用光学配件', lastRestockDate: '2026-05-20', location: '备件库D区-03', compatibleModels: ['JAUNDICE-LITE-PRO'] },
-];
 
 function TabButton({
   active,
@@ -145,14 +120,15 @@ function TabButton({
 }
 
 function EquipmentLedger() {
+  const { equipment, maintenanceWorkOrders, addMaintenanceWorkOrder } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('全部');
   const [categoryFilter, setCategoryFilter] = useState<string>('全部');
 
-  const categories = Array.from(new Set(mockEquipmentList.map((e) => e.category)));
+  const categories = Array.from(new Set(equipment.map((e) => e.category)));
   const statuses: Equipment['status'][] = ['正常', '使用中', '待维护', '维修中', '已报废'];
 
-  const filteredEquipments = mockEquipmentList.filter((eq) => {
+  const filteredEquipments = equipment.filter((eq) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       if (
@@ -171,6 +147,39 @@ function EquipmentLedger() {
     const CategoryIcon = equipmentCategoryIcons[equipment.category];
     if (CategoryIcon) return CategoryIcon;
     return fallbackIcons[index % fallbackIcons.length];
+  };
+
+  const handleGenerateWorkOrder = (eq: Equipment) => {
+    const now = new Date();
+    const nextMonth = new Date(now);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+
+    const y = now.getFullYear();
+    const m = (now.getMonth() + 1).toString().padStart(2, '0');
+    const d = now.getDate().toString().padStart(2, '0');
+    const h = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+
+    const existingIds = maintenanceWorkOrders.map((wo) => parseInt(wo.id.replace('WO', '')));
+    const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
+    const newId = `WO${String(maxId + 1).padStart(3, '0')}`;
+
+    const newOrder: MaintenanceWorkOrder = {
+      id: newId,
+      title: `${eq.name}定期维护`,
+      equipmentId: eq.id,
+      equipmentName: eq.name,
+      equipmentModel: eq.model,
+      orderType: '定期维护',
+      priority: '中',
+      status: '待处理',
+      description: `设备使用次数已达 ${eq.usageCount}/${eq.maxUsageCount}，达到使用寿命阈值，建议进行定期维护保养。内容包括：全面检查、清洁保养、易损件更换、性能校准等。`,
+      createTime: `${y}-${m}-${d} ${h}:${min}:00`,
+      estimatedDuration: 120,
+      sparePartsUsed: [],
+    };
+
+    addMaintenanceWorkOrder(newOrder);
   };
 
   return (
@@ -259,9 +268,13 @@ function EquipmentLedger() {
         {filteredEquipments.map((equipment, idx) => {
           const Icon = getEquipmentIcon(equipment, idx);
           const usageRatio = (equipment.usageCount / equipment.maxUsageCount) * 100;
-          const isNearThreshold = usageRatio >= 80;
+          const isNearThreshold = equipment.maxUsageCount > 0 && (equipment.usageCount / equipment.maxUsageCount) >= 0.8;
           const isWarning = equipment.status === '待维护';
           const gradient = equipmentCategoryGradients[equipment.category] || 'from-slate-500 to-slate-400';
+
+          const hasPendingOrder = maintenanceWorkOrders.some(
+            (wo) => wo.equipmentId === equipment.id && wo.orderType === '定期维护' && (wo.status === '待处理' || wo.status === '处理中')
+          );
 
           return (
             <div
@@ -353,10 +366,23 @@ function EquipmentLedger() {
                   <div className="text-[10px] text-slate-400">
                     下次维保: {equipment.nextMaintenanceDate}
                   </div>
-                  <button className="flex items-center gap-0.5 text-[11px] text-sky-600 font-medium hover:text-sky-700 transition-colors">
-                    详情
-                    <ChevronRight className="w-3 h-3" />
-                  </button>
+                  {isNearThreshold && !hasPendingOrder ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleGenerateWorkOrder(equipment);
+                      }}
+                      className="flex items-center gap-0.5 px-2.5 py-1 rounded-lg text-[11px] text-white font-medium bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 transition-all shadow-sm shadow-amber-500/30"
+                    >
+                      <Wrench className="w-3 h-3 mr-0.5" />
+                      生成工单
+                    </button>
+                  ) : (
+                    <button className="flex items-center gap-0.5 text-[11px] text-sky-600 font-medium hover:text-sky-700 transition-colors">
+                      详情
+                      <ChevronRight className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -368,33 +394,78 @@ function EquipmentLedger() {
 }
 
 function WorkOrders() {
-  const [workOrders, setWorkOrders] = useState(mockWorkOrders);
+  const { maintenanceWorkOrders, updateMaintenanceWorkOrder, spareParts, updateSparePart } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('全部');
+  const [typeFilter, setTypeFilter] = useState<string>('全部');
 
-  const filteredOrders = workOrders.filter((wo) => {
+  const orderTypes: MaintenanceWorkOrder['orderType'][] = ['定期维护', '故障维修', '保养'];
+
+  const filteredOrders = maintenanceWorkOrders.filter((wo) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       if (
         !wo.equipmentName.toLowerCase().includes(q) &&
-        !wo.title.toLowerCase().includes(q) &&
-        !(wo.assigneeName || '').toLowerCase().includes(q)
+        !wo.id.toLowerCase().includes(q) &&
+        !wo.title.toLowerCase().includes(q)
       )
         return false;
     }
     if (statusFilter !== '全部' && wo.status !== statusFilter) return false;
+    if (typeFilter !== '全部' && wo.orderType !== typeFilter) return false;
     return true;
   });
 
   const handleStatusChange = (orderId: string, newStatus: MaintenanceWorkOrder['status']) => {
-    setWorkOrders((orders) =>
-      orders.map((wo) => {
-        if (wo.id === orderId) {
-          return { ...wo, status: newStatus };
+    const order = maintenanceWorkOrders.find((wo) => wo.id === orderId);
+    if (!order) return;
+
+    if (newStatus === '已完成') {
+      order.sparePartsUsed.forEach((part) => {
+        const sparePart = spareParts.find((sp) => sp.id === part.partId);
+        if (sparePart) {
+          const newStock = Math.max(0, sparePart.currentStock - part.quantity);
+          let newStatus: SparePart['status'] = '正常';
+          if (newStock < sparePart.safeStock * 0.5) {
+            newStatus = '紧缺';
+          } else if (newStock < sparePart.safeStock) {
+            newStatus = '预警';
+          }
+          updateSparePart(part.partId, {
+            currentStock: newStock,
+            status: newStatus,
+          });
         }
-        return wo;
-      })
-    );
+      });
+    }
+
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = (now.getMonth() + 1).toString().padStart(2, '0');
+    const d = now.getDate().toString().padStart(2, '0');
+    const h = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const nowStr = `${y}-${m}-${d} ${h}:${min}:00`;
+
+    const updates: Partial<MaintenanceWorkOrder> = {
+      status: newStatus,
+    };
+
+    if (newStatus === '处理中' && !order.startTime) {
+      updates.startTime = nowStr;
+    }
+
+    if (newStatus === '已完成') {
+      updates.completeTime = nowStr;
+      if (!order.actualDuration && order.startTime) {
+        const start = new Date(order.startTime.replace(/-/g, '/'));
+        const end = new Date();
+        const duration = Math.round((end.getTime() - start.getTime()) / 60000);
+        updates.actualDuration = duration;
+      }
+    }
+
+    updateMaintenanceWorkOrder(orderId, updates);
   };
 
   const getNextActions = (currentStatus: MaintenanceWorkOrder['status']): { label: string; target: MaintenanceWorkOrder['status']; icon: React.ComponentType<{ className?: string }>; style: string }[] => {
@@ -423,10 +494,10 @@ function WorkOrders() {
   };
 
   const stats = {
-    pending: workOrders.filter((w) => w.status === '待处理').length,
-    processing: workOrders.filter((w) => w.status === '处理中').length,
-    completed: workOrders.filter((w) => w.status === '已完成').length,
-    delayed: workOrders.filter((w) => w.status === '已延期').length,
+    pending: maintenanceWorkOrders.filter((w) => w.status === '待处理').length,
+    processing: maintenanceWorkOrders.filter((w) => w.status === '处理中').length,
+    completed: maintenanceWorkOrders.filter((w) => w.status === '已完成').length,
+    delayed: maintenanceWorkOrders.filter((w) => w.status === '已延期').length,
   };
 
   return (
@@ -478,19 +549,20 @@ function WorkOrders() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索设备/工单/负责人"
+              placeholder="搜索设备名称/工单编号"
               className="w-72 pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
             />
           </div>
           <div className="flex items-center gap-1">
+            <Filter className="w-4 h-4 text-slate-400 mr-1" />
             <button
               onClick={() => setStatusFilter('全部')}
               className={cn(
@@ -500,9 +572,9 @@ function WorkOrders() {
                   : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
               )}
             >
-              全部
+              全部状态
             </button>
-            {(['待处理', '处理中', '已完成', '已延期'] as const).map((s) => (
+            {(['待处理', '处理中', '已完成'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
@@ -514,6 +586,33 @@ function WorkOrders() {
                 )}
               >
                 {s}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setTypeFilter('全部')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                typeFilter === '全部'
+                  ? 'bg-sky-500 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+              )}
+            >
+              全部类型
+            </button>
+            {orderTypes.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTypeFilter(t)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+                  typeFilter === t
+                    ? 'bg-sky-500 text-white'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:border-sky-300'
+                )}
+              >
+                {t}
               </button>
             ))}
           </div>
@@ -646,10 +745,11 @@ function WorkOrders() {
 }
 
 function SparePartsInventory() {
+  const { spareParts } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('全部');
 
-  const categories = Array.from(new Set(mockSpareParts.map((p) => p.category)));
+  const categories = Array.from(new Set(spareParts.map((p) => p.category)));
 
   const getRowBgClass = (item: SparePart) => {
     const ratio = item.currentStock / item.safeStock;
@@ -667,16 +767,16 @@ function SparePartsInventory() {
     return styles[status];
   };
 
-  const filteredItems = mockSpareParts.filter((item) => {
+  const filteredItems = spareParts.filter((item) => {
     if (searchQuery && !item.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (categoryFilter !== '全部' && item.category !== categoryFilter) return false;
     return true;
   });
 
   const stockStats = {
-    normal: mockSpareParts.filter((i) => i.currentStock >= i.safeStock).length,
-    warning: mockSpareParts.filter((i) => i.currentStock < i.safeStock && i.currentStock >= i.safeStock * 0.5).length,
-    critical: mockSpareParts.filter((i) => i.currentStock < i.safeStock * 0.5).length,
+    normal: spareParts.filter((i) => i.currentStock >= i.safeStock).length,
+    warning: spareParts.filter((i) => i.currentStock < i.safeStock && i.currentStock >= i.safeStock * 0.5).length,
+    critical: spareParts.filter((i) => i.currentStock < i.safeStock * 0.5).length,
   };
 
   return (
@@ -896,6 +996,7 @@ function SparePartsInventory() {
 }
 
 export default function Equipment() {
+  const { equipment, maintenanceWorkOrders } = useAppStore();
   const [activeTab, setActiveTab] = useState<EquipmentTab>('ledger');
 
   return (
@@ -921,14 +1022,14 @@ export default function Equipment() {
             onClick={() => setActiveTab('ledger')}
             icon={ClipboardList}
             label="设备台账"
-            badge={mockEquipmentList.length}
+            badge={equipment.length}
           />
           <TabButton
             active={activeTab === 'workorders'}
             onClick={() => setActiveTab('workorders')}
             icon={Wrench}
             label="维保工单"
-            badge={mockWorkOrders.filter((w) => w.status === '待处理' || w.status === '处理中').length}
+            badge={maintenanceWorkOrders.filter((w) => w.status === '待处理' || w.status === '处理中').length}
           />
           <TabButton
             active={activeTab === 'spareparts'}

@@ -34,7 +34,8 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { Customer, RoomType, DeliveryMethod } from '@/types';
-import { customers as mockCustomers, rooms as mockRooms, nurses as mockNurses } from '@/data/mockData';
+import { nurses as mockNurses } from '@/data/mockData';
+import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 type CustomerStatus = Customer['status'] | '全部';
@@ -62,6 +63,14 @@ interface CustomerFormData {
   allergies: string;
   primaryNurseId: string;
   remark: string;
+}
+
+interface FormErrors {
+  motherName?: string;
+  phone?: string;
+  roomNumber?: string;
+  checkInDate?: string;
+  expectedCheckOutDate?: string;
 }
 
 const initialFormData: CustomerFormData = {
@@ -147,7 +156,7 @@ function RatingStars({ score }: { score?: number }) {
 }
 
 export default function Customers() {
-  const [customers, setCustomers] = useState<Customer[]>(mockCustomers);
+  const { customers, rooms, addCustomer, updateRoom } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [roomTypeFilter, setRoomTypeFilter] = useState<RoomTypeFilter>('全部');
   const [statusFilter, setStatusFilter] = useState<CustomerStatus>('全部');
@@ -157,6 +166,7 @@ export default function Customers() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [formStep, setFormStep] = useState(0);
   const [formData, setFormData] = useState<CustomerFormData>(initialFormData);
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
 
   const filteredCustomers = useMemo(() => {
     return customers.filter(c => {
@@ -170,14 +180,14 @@ export default function Customers() {
       }
       if (statusFilter !== '全部' && c.status !== statusFilter) return false;
       if (roomTypeFilter !== '全部') {
-        const room = mockRooms.find(r => r.id === c.roomId);
+        const room = rooms.find(r => r.id === c.roomId);
         if (room?.roomType !== roomTypeFilter) return false;
       }
       if (dateFrom && c.checkInDate < dateFrom) return false;
       if (dateTo && c.checkInDate > dateTo) return false;
       return true;
     });
-  }, [customers, searchQuery, statusFilter, roomTypeFilter, dateFrom, dateTo]);
+  }, [customers, rooms, searchQuery, statusFilter, roomTypeFilter, dateFrom, dateTo]);
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedRows);
@@ -187,7 +197,18 @@ export default function Customers() {
   };
 
   const getRoomType = (customer: Customer): RoomType => {
-    return mockRooms.find(r => r.id === customer.roomId)?.roomType || '标准间';
+    return rooms.find(r => r.id === customer.roomId)?.roomType || '标准间';
+  };
+
+  const validateForm = (): boolean => {
+    const errors: FormErrors = {};
+    if (!formData.motherName.trim()) errors.motherName = '请输入姓名';
+    if (!formData.phone.trim()) errors.phone = '请输入联系电话';
+    if (!formData.roomNumber.trim()) errors.roomNumber = '请选择分配房间';
+    if (!formData.checkInDate.trim()) errors.checkInDate = '请选择入住日期';
+    if (!formData.expectedCheckOutDate.trim()) errors.expectedCheckOutDate = '请选择预计离店日期';
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const generateGrowthData = (customer: Customer) => {
@@ -210,15 +231,23 @@ export default function Customers() {
   };
 
   const handleSubmit = () => {
+    if (!validateForm()) {
+      if (formStep !== 0) setFormStep(0);
+      return;
+    }
+
+    const selectedRoom = rooms.find(r => r.roomNumber === formData.roomNumber);
+    const customerId = `C${String(customers.length + 1).padStart(3, '0')}`;
+
     const newCustomer: Customer = {
-      id: `C${String(customers.length + 1).padStart(3, '0')}`,
+      id: customerId,
       motherName: formData.motherName,
       motherAge: formData.motherAge,
       phone: formData.phone,
       idCard: formData.idCard,
       emergencyContact: formData.emergencyContact,
       emergencyPhone: formData.emergencyPhone,
-      roomId: mockRooms.find(r => r.roomNumber === formData.roomNumber)?.id || 'RM001',
+      roomId: selectedRoom?.id || 'RM001',
       roomNumber: formData.roomNumber,
       deliveryMethod: formData.deliveryMethod,
       deliveryDate: formData.deliveryDate,
@@ -261,14 +290,27 @@ export default function Customers() {
       allergies: formData.allergies ? formData.allergies.split(/[,，]/) : [],
       carePlanId: `CP${String(customers.length + 1).padStart(3, '0')}`,
       primaryNurseId: formData.primaryNurseId,
-      status: '待入住',
+      status: '在住',
       remark: formData.remark,
       createTime: new Date().toISOString(),
     };
-    setCustomers([newCustomer, ...customers]);
+
+    addCustomer(newCustomer);
+
+    if (selectedRoom) {
+      updateRoom(selectedRoom.id, {
+        status: '已入住',
+        customerId: customerId,
+        customerName: formData.motherName,
+        checkInDate: formData.checkInDate,
+        expectedCheckOutDate: formData.expectedCheckOutDate,
+      });
+    }
+
     setDrawerOpen(false);
     setFormStep(0);
     setFormData(initialFormData);
+    setFormErrors({});
   };
 
   const stepTitles = ['基本信息', '母婴信息', '健康档案'];
@@ -321,10 +363,9 @@ export default function Customers() {
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400"
               >
                 <option value="全部">全部房型</option>
-                <option value="标准间">标准间</option>
-                <option value="豪华间">豪华间</option>
-                <option value="VIP套房">VIP套房</option>
-                <option value="总统套房">总统套房</option>
+                {Array.from(new Set(rooms.map(r => r.roomType))).map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
               </select>
             </div>
 
@@ -648,7 +689,7 @@ export default function Customers() {
         <div className="fixed inset-0 z-50 flex">
           <div
             className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            onClick={() => setDrawerOpen(false)}
+            onClick={() => { setDrawerOpen(false); setFormStep(0); setFormData(initialFormData); setFormErrors({}); }}
           />
           <div className="relative ml-auto w-full max-w-xl bg-white shadow-2xl h-full overflow-y-auto flex flex-col">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 z-10">
@@ -661,7 +702,7 @@ export default function Customers() {
                   <p className="text-xs text-slate-500 mt-0.5">填写完整信息以创建新客户档案</p>
                 </div>
                 <button
-                  onClick={() => { setDrawerOpen(false); setFormStep(0); }}
+                  onClick={() => { setDrawerOpen(false); setFormStep(0); setFormData(initialFormData); setFormErrors({}); }}
                   className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -710,9 +751,18 @@ export default function Customers() {
                         <input
                           type="text"
                           value={formData.motherName}
-                          onChange={e => setFormData({ ...formData, motherName: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400"
+                          onChange={e => {
+                            setFormData({ ...formData, motherName: e.target.value });
+                            if (formErrors.motherName) setFormErrors({ ...formErrors, motherName: undefined });
+                          }}
+                          className={cn(
+                            "w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400",
+                            formErrors.motherName ? "border-red-400" : "border-slate-200"
+                          )}
                         />
+                        {formErrors.motherName && (
+                          <p className="mt-1 text-xs text-red-500">{formErrors.motherName}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">年龄 *</label>
@@ -728,9 +778,18 @@ export default function Customers() {
                         <input
                           type="tel"
                           value={formData.phone}
-                          onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400"
+                          onChange={e => {
+                            setFormData({ ...formData, phone: e.target.value });
+                            if (formErrors.phone) setFormErrors({ ...formErrors, phone: undefined });
+                          }}
+                          className={cn(
+                            "w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400",
+                            formErrors.phone ? "border-red-400" : "border-slate-200"
+                          )}
                         />
+                        {formErrors.phone && (
+                          <p className="mt-1 text-xs text-red-500">{formErrors.phone}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">身份证号</label>
@@ -772,16 +831,25 @@ export default function Customers() {
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">分配房间 *</label>
                         <select
                           value={formData.roomNumber}
-                          onChange={e => setFormData({ ...formData, roomNumber: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400"
+                          onChange={e => {
+                            setFormData({ ...formData, roomNumber: e.target.value });
+                            if (formErrors.roomNumber) setFormErrors({ ...formErrors, roomNumber: undefined });
+                          }}
+                          className={cn(
+                            "w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400",
+                            formErrors.roomNumber ? "border-red-400" : "border-slate-200"
+                          )}
                         >
                           <option value="">请选择房间</option>
-                          {mockRooms.filter(r => r.status === '空闲').map(r => (
+                          {rooms.filter(r => r.status === '空闲').map(r => (
                             <option key={r.id} value={r.roomNumber}>
                               {r.roomNumber} - {r.roomType} (¥{r.pricePerDay}/天)
                             </option>
                           ))}
                         </select>
+                        {formErrors.roomNumber && (
+                          <p className="mt-1 text-xs text-red-500">{formErrors.roomNumber}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">主管护理师</label>
@@ -803,18 +871,36 @@ export default function Customers() {
                         <input
                           type="date"
                           value={formData.checkInDate}
-                          onChange={e => setFormData({ ...formData, checkInDate: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400"
+                          onChange={e => {
+                            setFormData({ ...formData, checkInDate: e.target.value });
+                            if (formErrors.checkInDate) setFormErrors({ ...formErrors, checkInDate: undefined });
+                          }}
+                          className={cn(
+                            "w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400",
+                            formErrors.checkInDate ? "border-red-400" : "border-slate-200"
+                          )}
                         />
+                        {formErrors.checkInDate && (
+                          <p className="mt-1 text-xs text-red-500">{formErrors.checkInDate}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-600 mb-1.5">预计离店日期 *</label>
                         <input
                           type="date"
                           value={formData.expectedCheckOutDate}
-                          onChange={e => setFormData({ ...formData, expectedCheckOutDate: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400"
+                          onChange={e => {
+                            setFormData({ ...formData, expectedCheckOutDate: e.target.value });
+                            if (formErrors.expectedCheckOutDate) setFormErrors({ ...formErrors, expectedCheckOutDate: undefined });
+                          }}
+                          className={cn(
+                            "w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/30 focus:border-pink-400",
+                            formErrors.expectedCheckOutDate ? "border-red-400" : "border-slate-200"
+                          )}
                         />
+                        {formErrors.expectedCheckOutDate && (
+                          <p className="mt-1 text-xs text-red-500">{formErrors.expectedCheckOutDate}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1035,7 +1121,7 @@ export default function Customers() {
               </button>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => { setDrawerOpen(false); setFormStep(0); }}
+                  onClick={() => { setDrawerOpen(false); setFormStep(0); setFormData(initialFormData); setFormErrors({}); }}
                   className="px-5 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                 >
                   取消
