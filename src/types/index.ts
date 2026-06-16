@@ -148,6 +148,32 @@ export interface CareTask {
   adjustReason?: string;
   adjustTime?: string;
   operatorName?: string;
+  // 交接相关字段
+  isHandover?: boolean;
+  handoverFromId?: string;
+  handoverFromName?: string;
+  handoverToId?: string;
+  handoverToName?: string;
+  handoverNote?: string;
+  handoverTime?: string;
+}
+
+export interface TaskHandoverRecord {
+  id: string;
+  taskId: string;
+  taskName: string;
+  customerId: string;
+  customerName: string;
+  roomNumber: string;
+  fromNurseId: string;
+  fromNurseName: string;
+  toNurseId: string;
+  toNurseName: string;
+  note: string;
+  handoverTime: string;
+  carePlanId?: string;
+  taskStatusBefore: TaskStatus;
+  taskStatusAfter: TaskStatus;
 }
 
 export interface CarePlan {
@@ -180,6 +206,11 @@ export interface ApprovalRecord {
   action: string;
   comment?: string;
   operateTime: string;
+  // 关联任务信息
+  taskId?: string;
+  taskName?: string;
+  taskStatus?: TaskStatus;
+  carePlanId?: string;
 }
 
 export interface ScheduleEntry {

@@ -21,16 +21,20 @@ import {
   UserCheck,
   LayoutGrid,
   AlertCircle,
+  ArrowRightLeft,
+  ArrowRight,
+  ArrowLeft,
 } from 'lucide-react';
 import type { CareTask, TaskStatus, Nurse, TaskPriority } from '@/types';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
-type ViewMode = 'all' | 'my';
+type ViewMode = 'all' | 'my' | 'handover';
 type KanbanStatus = '待执行' | '进行中' | '已完成';
 type SubStatusTab = '全部' | '待执行' | '进行中' | '调整中';
 type NurseFilter = string | '全部';
 type TaskTypeFilter = CareTask['category'] | '全部';
+type HandoverSubTab = 'pending' | 'completed';
 
 interface DragState {
   taskId: string | null;
@@ -112,7 +116,9 @@ function TaskCard({
   getNurse,
   onAccept,
   onApplyAdjust,
+  onHandover,
   viewMode,
+  showHandoverButton = false,
 }: {
   task: CareTask;
   onDragStart: (id: string) => void;
@@ -123,7 +129,9 @@ function TaskCard({
   getNurse: (id?: string) => Nurse | undefined;
   onAccept: (task: CareTask) => void;
   onApplyAdjust: (task: CareTask) => void;
+  onHandover?: (task: CareTask) => void;
   viewMode: ViewMode;
+  showHandoverButton?: boolean;
 }) {
   const nurse = getNurse(task.assigneeId);
   const catStyle = categoryIcons[task.category];
@@ -189,6 +197,11 @@ function TaskCard({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {task.isHandover && (
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-gradient-to-br from-violet-500 to-purple-600 text-white text-[10px] font-bold shadow-sm">
+              H
+            </span>
+          )}
           {cardDraggable && (
             <GripVertical className="w-4 h-4 text-slate-300 group-hover:text-slate-400 transition-colors" />
           )}
@@ -248,6 +261,11 @@ function TaskCard({
               调整中
             </span>
           )}
+          {task.isHandover && task.handoverToName && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-600 text-[10px] font-medium border border-violet-200">
+              已交接给{task.handoverToName}
+            </span>
+          )}
           <span className={cn(
             'px-1.5 py-0.5 rounded-md text-[10px] font-medium border',
             priorityStyles[task.priority]
@@ -278,6 +296,18 @@ function TaskCard({
               </button>
             </div>
           )}
+          {showHandoverButton && onHandover && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onHandover(task);
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium text-white bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 transition-all shadow-sm shadow-violet-500/30"
+            >
+              <ArrowRightLeft className="w-3 h-3" />
+              交接
+            </button>
+          )}
         </div>
       </div>
 
@@ -293,15 +323,20 @@ function TaskCard({
 }
 
 export default function Tasks() {
-  const { careTasks: tasks, nurses, carePlans, updateCareTask, updateCarePlan } = useAppStore();
+  const { careTasks: tasks, nurses, carePlans, updateCareTask, updateCarePlan, taskHandoverRecords, handoverTask } = useAppStore();
 
-  // 视角模式：全部任务 / 我的任务
+  // 视角模式：全部任务 / 我的任务 / 交接班
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   // 我的任务 - 护理师选择（当前登录护理师模拟）
   // 注释：当前"护理师选择"仅做前端展示模拟，后续接登录后取当前用户
   const [selectedNurseId, setSelectedNurseId] = useState<string>('');
   // 我的任务 - 状态子Tab
   const [subStatusTab, setSubStatusTab] = useState<SubStatusTab>('全部');
+  // 交接班 - 子Tab
+  const [handoverSubTab, setHandoverSubTab] = useState<HandoverSubTab>('pending');
+  // 交接班 - 护理师选择（当前登录护理师模拟）
+  // 注释：当前"护理师选择"仅做前端展示模拟，后续接登录后取当前用户
+  const [handoverNurseId, setHandoverNurseId] = useState<string>('');
 
   // 全部任务视角下的筛选器
   const [searchQuery, setSearchQuery] = useState('');
@@ -312,13 +347,19 @@ export default function Tasks() {
 
   const [drag, setDrag] = useState<DragState>({ taskId: null, fromColumn: null, overColumn: null });
   const [adjustTask, setAdjustTask] = useState<CareTask | null>(null);
+  const [handoverTaskState, setHandoverTaskState] = useState<CareTask | null>(null);
 
   // 初始化默认护理师为第一个
   useEffect(() => {
-    if (nurses.length > 0 && !selectedNurseId) {
-      setSelectedNurseId(nurses[0].id);
+    if (nurses.length > 0) {
+      if (!selectedNurseId) {
+        setSelectedNurseId(nurses[0].id);
+      }
+      if (!handoverNurseId) {
+        setHandoverNurseId(nurses[0].id);
+      }
     }
-  }, [nurses, selectedNurseId]);
+  }, [nurses, selectedNurseId, handoverNurseId]);
 
   const getNurse = (id?: string) => nurses.find(n => n.id === id);
 
@@ -328,6 +369,39 @@ export default function Tasks() {
     // 调整中任务仍放在待执行列
     return '待执行';
   };
+
+  const isTaskSoonOverdue = (task: CareTask): boolean => {
+    if (task.isOverdue || task.status === '已超时') return true;
+    const deadline = new Date(task.scheduledTime);
+    const now = new Date();
+    const diffMs = deadline.getTime() - now.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    return diffHours <= 1 && diffHours > 0;
+  };
+
+  const isPendingHandover = (task: CareTask, nurseId: string): boolean => {
+    if (task.assigneeId !== nurseId) return false;
+    const todayStr = getTodayString();
+    const taskDate = task.scheduledTime.slice(0, 10);
+    if (taskDate !== todayStr) return false;
+    // 待交接任务：今天未完成 + 调整中 + 即将超时
+    // 已完成的任务不需要交接
+    if (task.status === '已完成') return false;
+    // 未完成的任务（包括待执行、进行中、调整中、已超时）+ 即将超时的都需要交接
+    // 由于前面已排除已完成，这里直接返回 true 即可
+    // （调整中和即将超时都包含在未完成中，或属于需要特别关注的情况）
+    return true;
+  };
+
+  const handoverPendingTasks = useMemo(() => {
+    return tasks.filter(t => isPendingHandover(t, handoverNurseId));
+  }, [tasks, handoverNurseId]);
+
+  const handoverCompletedRecords = useMemo(() => {
+    return taskHandoverRecords.filter(r =>
+      r.fromNurseId === handoverNurseId || r.toNurseId === handoverNurseId
+    ).sort((a, b) => new Date(b.handoverTime).getTime() - new Date(a.handoverTime).getTime());
+  }, [taskHandoverRecords, handoverNurseId]);
 
   const filteredTasks = useMemo(() => {
     const todayStr = getTodayString();
@@ -380,14 +454,62 @@ export default function Tasks() {
     return grouped;
   }, [filteredTasks]);
 
+  const handleHandover = (task: CareTask) => {
+    setHandoverTaskState(task);
+  };
+
+  const handleSubmitHandover = (task: CareTask, toNurseId: string, note: string) => {
+    const fromNurse = getNurse(task.assigneeId);
+    const toNurse = getNurse(toNurseId);
+    if (!fromNurse || !toNurse) return;
+
+    handoverTask({
+      taskId: task.id,
+      taskName: task.taskName,
+      customerId: task.customerId,
+      customerName: task.customerName,
+      roomNumber: task.roomNumber,
+      fromNurseId: fromNurse.id,
+      fromNurseName: fromNurse.name,
+      toNurseId: toNurse.id,
+      toNurseName: toNurse.name,
+      note,
+      carePlanId: task.carePlanId,
+      taskStatusBefore: task.status,
+      taskStatusAfter: task.status,
+    });
+
+    setHandoverTaskState(null);
+  };
+
   // 统计：当前显示列表的数字
   const stats = useMemo(() => {
-    const total = filteredTasks.length;
-    const overdue = filteredTasks.filter(t => t.isOverdue || t.status === '已超时').length;
-    const completed = filteredTasks.filter(t => t.status === '已完成').length;
-    const inProgress = filteredTasks.filter(t => t.status === '进行中').length;
+    let total = 0;
+    let overdue = 0;
+    let completed = 0;
+    let inProgress = 0;
+
+    if (viewMode === 'handover') {
+      if (handoverSubTab === 'pending') {
+        total = handoverPendingTasks.length;
+        overdue = handoverPendingTasks.filter(t => t.isOverdue || t.status === '已超时' || isTaskSoonOverdue(t)).length;
+        completed = handoverPendingTasks.filter(t => t.status === '已完成').length;
+        inProgress = handoverPendingTasks.filter(t => t.status === '进行中').length;
+      } else {
+        total = handoverCompletedRecords.length;
+        overdue = 0;
+        completed = 0;
+        inProgress = 0;
+      }
+    } else {
+      total = filteredTasks.length;
+      overdue = filteredTasks.filter(t => t.isOverdue || t.status === '已超时').length;
+      completed = filteredTasks.filter(t => t.status === '已完成').length;
+      inProgress = filteredTasks.filter(t => t.status === '进行中').length;
+    }
+
     return { total, overdue, completed, inProgress, rate: total > 0 ? Math.round((completed / total) * 100) : 0 };
-  }, [filteredTasks]);
+  }, [viewMode, handoverSubTab, handoverPendingTasks, handoverCompletedRecords, filteredTasks]);
 
   const handleDragStart = (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
@@ -474,6 +596,8 @@ export default function Tasks() {
   };
 
   const isAllView = viewMode === 'all';
+  const isMyView = viewMode === 'my';
+  const isHandoverView = viewMode === 'handover';
 
   return (
     <div className="h-full flex flex-col bg-slate-50">
@@ -483,30 +607,42 @@ export default function Tasks() {
           <div>
             <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
               <LayoutGrid className="w-5 h-5 text-sky-500" />
-              任务中心
+              {isHandoverView ? '交接班管理' : '任务中心'}
             </h1>
-            <p className="text-sm text-slate-500 mt-0.5">拖拽切换任务状态，实时追踪护理任务执行进度</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {isHandoverView
+                ? '高效完成护理任务交接，确保工作无缝衔接'
+                : '拖拽切换任务状态，实时追踪护理任务执行进度'}
+            </p>
           </div>
           <div className="flex items-center gap-6">
             <div className="text-center">
               <div className="text-2xl font-bold text-slate-800">{stats.total}</div>
-              <div className="text-[11px] text-slate-500">今日总任务</div>
-            </div>
-            <div className="w-px h-10 bg-slate-200" />
-            <div className="text-center">
-              <div className="text-2xl font-bold text-sky-600">{stats.inProgress}</div>
-              <div className="text-[11px] text-slate-500">进行中</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-emerald-600">{stats.rate}%</div>
-              <div className="text-[11px] text-slate-500">完成率</div>
-            </div>
-            <div className="text-center">
-              <div className={cn('text-2xl font-bold', stats.overdue > 0 ? 'text-red-600' : 'text-slate-400')}>
-                {stats.overdue}
+              <div className="text-[11px] text-slate-500">
+                {isHandoverView && handoverSubTab === 'completed' ? '交接记录' : '今日总任务'}
               </div>
-              <div className="text-[11px] text-slate-500">超时</div>
             </div>
+            {!(isHandoverView && handoverSubTab === 'completed') && (
+              <>
+                <div className="w-px h-10 bg-slate-200" />
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-sky-600">{stats.inProgress}</div>
+                  <div className="text-[11px] text-slate-500">进行中</div>
+                </div>
+                <div className="w-px h-10 bg-slate-200" />
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-emerald-600">{stats.rate}%</div>
+                  <div className="text-[11px] text-slate-500">完成率</div>
+                </div>
+                <div className="w-px h-10 bg-slate-200" />
+                <div className="text-center">
+                  <div className={cn('text-2xl font-bold', stats.overdue > 0 ? 'text-red-600' : 'text-slate-400')}>
+                    {stats.overdue}
+                  </div>
+                  <div className="text-[11px] text-slate-500">超时/即将超时</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -530,17 +666,28 @@ export default function Tasks() {
               onClick={() => setViewMode('my')}
               className={cn(
                 'px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200',
-                !isAllView
+                isMyView
                   ? 'bg-white text-sky-600 shadow-sm'
                   : 'text-slate-500 hover:text-slate-700'
               )}
             >
               我的任务
             </button>
+            <button
+              onClick={() => setViewMode('handover')}
+              className={cn(
+                'px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                isHandoverView
+                  ? 'bg-white text-sky-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
+            >
+              交接班
+            </button>
           </div>
 
           {/* 我的任务视角 - 护理师选择 + 状态子Tab */}
-          {!isAllView && (
+          {isMyView && (
             <div className="flex items-center gap-4">
               {/* 护理师选择下拉 */}
               <div className="flex items-center gap-2">
@@ -576,6 +723,55 @@ export default function Tasks() {
                     {tab.label}
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* 交接班视角 - 护理师选择 + 子Tab */}
+          {isHandoverView && (
+            <div className="flex items-center gap-4">
+              {/* 护理师选择下拉 */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-500">当前护理师：</span>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    value={handoverNurseId}
+                    onChange={e => setHandoverNurseId(e.target.value)}
+                    className="w-44 pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 appearance-none bg-white cursor-pointer"
+                  >
+                    {nurses.map(n => (
+                      <option key={n.id} value={n.id}>{n.name} · {n.nurseLevel}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* 交接子Tab */}
+              <div className="flex items-center gap-1 bg-violet-50 rounded-xl p-1 border border-violet-200">
+                <button
+                  onClick={() => setHandoverSubTab('pending')}
+                  className={cn(
+                    'px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200',
+                    handoverSubTab === 'pending'
+                      ? 'bg-white text-violet-700 shadow-sm border border-violet-200'
+                      : 'text-violet-500 hover:text-violet-700'
+                  )}
+                >
+                  待交接
+                </button>
+                <button
+                  onClick={() => setHandoverSubTab('completed')}
+                  className={cn(
+                    'px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200',
+                    handoverSubTab === 'completed'
+                      ? 'bg-white text-violet-700 shadow-sm border border-violet-200'
+                      : 'text-violet-500 hover:text-violet-700'
+                  )}
+                >
+                  已交接
+                </button>
               </div>
             </div>
           )}
@@ -681,7 +877,7 @@ export default function Tasks() {
       )}
 
       {/* 我的任务视角 - 无筛选器，仅显示图例 */}
-      {!isAllView && (
+      {isMyView && (
         <div className="px-6 py-2 bg-white border-b border-slate-100 shrink-0">
           <div className="flex items-center justify-end gap-2 text-xs text-slate-500">
             <span className="flex items-center gap-1.5">
@@ -694,110 +890,269 @@ export default function Tasks() {
         </div>
       )}
 
-      {/* Kanban 看板区域 */}
-      <div className="flex-1 overflow-hidden p-6">
-        <div className="h-full grid grid-cols-3 gap-5">
-          {kanbanColumns.map(col => {
-            const colTasks = tasksByColumn[col.status];
-            const ColIcon = col.icon;
-            const isDropTarget = drag.overColumn === col.status;
-            const allowDrop = isAllView;
+      {/* 交接班视角 - 图例 */}
+      {isHandoverView && (
+        <div className="px-6 py-2 bg-white border-b border-slate-100 shrink-0">
+          <div className="flex items-center justify-end gap-2 text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded border-2 border-red-300 bg-red-50" /> 超时任务
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded border-2 border-orange-300 bg-orange-50" /> 调整中
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded border-2 border-violet-300 bg-violet-50" /> 已交接
+            </span>
+          </div>
+        </div>
+      )}
 
-            return (
-              <div
-                key={col.status}
-                onDragOver={e => {
-                  if (!allowDrop) return;
-                  e.preventDefault();
-                  if (drag.taskId && drag.overColumn !== col.status) {
-                    setDrag(prev => ({ ...prev, overColumn: col.status }));
-                  }
-                }}
-                onDragLeave={e => {
-                  if (!allowDrop) return;
-                  if (!e.currentTarget.contains(e.relatedTarget as Node) && drag.overColumn === col.status) {
-                    setDrag(prev => ({ ...prev, overColumn: null }));
-                  }
-                }}
-                onDrop={e => {
-                  if (!allowDrop) return;
-                  e.preventDefault();
-                  handleDragEnd();
-                }}
-                className={cn(
-                  'flex flex-col rounded-2xl transition-all duration-200 overflow-hidden',
-                  allowDrop && isDropTarget
-                    ? 'bg-sky-50/50 ring-2 ring-sky-300 ring-dashed'
-                    : 'bg-slate-100/60'
-                )}
-              >
-                <div className={cn('px-4 py-3 flex items-center justify-between shrink-0', col.bg)}>
-                  <div className="flex items-center gap-2">
-                    <div className={cn('w-2.5 h-2.5 rounded-full', col.accent)} />
-                    <ColIcon className={cn('w-4 h-4', col.color)} />
-                    <h2 className={cn('font-semibold text-sm', col.color)}>{col.status}</h2>
-                    <span className={cn(
-                      'px-2 py-0.5 rounded-full text-[10px] font-bold',
-                      col.accent, 'text-white'
-                    )}>
-                      {colTasks.length}
-                    </span>
-                  </div>
-                  <button className={cn(
-                    'w-6 h-6 rounded-lg flex items-center justify-center transition-colors',
-                    'text-slate-400 hover:text-slate-600 hover:bg-white/60'
-                  )}>
-                    <MoreHorizontal className="w-4 h-4" />
-                  </button>
+      {/* 交接班视图 - 待交接/已交接列表 */}
+      {isHandoverView ? (
+        <div className="flex-1 overflow-hidden p-6">
+          {handoverSubTab === 'pending' ? (
+            <div className="h-full flex flex-col bg-violet-50/30 rounded-2xl overflow-hidden border border-violet-200">
+              <div className="px-4 py-3 bg-gradient-to-r from-violet-500 to-purple-600 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                  <ArrowRightLeft className="w-4 h-4 text-white" />
+                  <h2 className="font-semibold text-sm text-white">待交接任务</h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
+                    {handoverPendingTasks.length}
+                  </span>
                 </div>
+              </div>
 
-                <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                  {colTasks.map(task => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                      onDragOver={() => setDrag(prev => prev.taskId === task.id ? prev : { ...prev, overColumn: col.status })}
-                      isDragging={drag.taskId === task.id}
-                      isOverColumn={drag.overColumn === col.status && drag.taskId !== task.id}
-                      getNurse={getNurse}
-                      onAccept={handleAcceptTask}
-                      onApplyAdjust={(t) => setAdjustTask(t)}
-                      viewMode={viewMode}
-                    />
-                  ))}
+              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {handoverPendingTasks.map(task => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={() => {}}
+                    isDragging={false}
+                    isOverColumn={false}
+                    getNurse={getNurse}
+                    onAccept={handleAcceptTask}
+                    onApplyAdjust={(t) => setAdjustTask(t)}
+                    onHandover={handleHandover}
+                    viewMode={viewMode}
+                    showHandoverButton={true}
+                  />
+                ))}
 
-                  {colTasks.length === 0 && (
-                    <div className="h-32 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl mx-1">
-                      {allowDrop && isDropTarget ? (
-                        <>
-                          <CheckCircle2 className="w-6 h-6 text-sky-400 mb-1" />
-                          <span className="text-xs text-sky-500 font-medium">松开放置</span>
-                        </>
-                      ) : (
-                        <>
-                          <ListTodo className="w-6 h-6 mb-1" />
-                          <span className="text-xs">暂无任务</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {col.status === '待执行' && isAllView && (
-                  <div className="p-3 pt-0 shrink-0">
-                    <button className="w-full py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 text-sm font-medium hover:border-sky-400 hover:text-sky-500 hover:bg-white/50 transition-colors flex items-center justify-center gap-1.5">
-                      <ListTodo className="w-4 h-4" />
-                      新建任务
-                    </button>
+                {handoverPendingTasks.length === 0 && (
+                  <div className="h-40 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-violet-200 rounded-xl mx-1">
+                    <ArrowRightLeft className="w-8 h-8 text-violet-300 mb-2" />
+                    <span className="text-sm text-violet-500 font-medium">暂无待交接任务</span>
+                    <span className="text-xs text-violet-400 mt-1">所有任务已处理完毕</span>
                   </div>
                 )}
               </div>
-            );
-          })}
+            </div>
+          ) : (
+            <div className="h-full flex flex-col bg-violet-50/30 rounded-2xl overflow-hidden border border-violet-200">
+              <div className="px-4 py-3 bg-gradient-to-r from-violet-500 to-purple-600 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                  <CheckCircle2 className="w-4 h-4 text-white" />
+                  <h2 className="font-semibold text-sm text-white">交接记录</h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
+                    {handoverCompletedRecords.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {handoverCompletedRecords.map(record => {
+                  const isOutgoing = record.fromNurseId === handoverNurseId;
+                  return (
+                    <div
+                      key={record.id}
+                      className="relative bg-white rounded-xl p-4 shadow-sm border border-violet-100 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                    >
+                      <div className="absolute left-0 top-4 bottom-4 w-1 bg-violet-400 rounded-r" />
+
+                      <div className="flex items-start gap-3">
+                        <div className={cn(
+                          'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
+                          isOutgoing ? 'bg-violet-100' : 'bg-purple-100'
+                        )}>
+                          {isOutgoing ? (
+                            <ArrowRight className="w-5 h-5 text-violet-600" />
+                          ) : (
+                            <ArrowLeft className="w-5 h-5 text-purple-600" />
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium',
+                              isOutgoing
+                                ? 'bg-violet-50 text-violet-600 border border-violet-200'
+                                : 'bg-purple-50 text-purple-600 border border-purple-200'
+                            )}>
+                              {isOutgoing ? '交接出去' : '交接进来'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {formatDateTime(new Date(record.handoverTime)).slice(5)}
+                            </span>
+                          </div>
+
+                          <h3 className="text-sm font-semibold text-slate-800 mt-2 line-clamp-1">{record.taskName}</h3>
+
+                          <div className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                            <div className="flex items-center gap-1">
+                              <Avatar name={record.fromNurseName} size="sm" />
+                              <span className="font-medium">{record.fromNurseName}</span>
+                            </div>
+                            <ArrowRight className="w-3 h-3 text-violet-400" />
+                            <div className="flex items-center gap-1">
+                              <Avatar name={record.toNurseName} size="sm" />
+                              <span className="font-medium">{record.toNurseName}</span>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+                            <User className="w-3 h-3" />
+                            <span>{record.customerName}</span>
+                            <span className="text-slate-300">·</span>
+                            <span>{record.roomNumber}室</span>
+                          </div>
+
+                          {record.note && (
+                            <div className="mt-3 p-3 bg-slate-50 rounded-lg">
+                              <div className="text-[11px] text-slate-500 mb-1">交接备注</div>
+                              <p className="text-xs text-slate-700 leading-relaxed">{record.note}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {handoverCompletedRecords.length === 0 && (
+                  <div className="h-40 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-violet-200 rounded-xl mx-1">
+                    <CheckCircle2 className="w-8 h-8 text-violet-300 mb-2" />
+                    <span className="text-sm text-violet-500 font-medium">暂无交接记录</span>
+                    <span className="text-xs text-violet-400 mt-1">完成交接后将显示在此处</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-hidden p-6">
+          <div className="h-full grid grid-cols-3 gap-5">
+            {kanbanColumns.map(col => {
+              const colTasks = tasksByColumn[col.status];
+              const ColIcon = col.icon;
+              const isDropTarget = drag.overColumn === col.status;
+              const allowDrop = isAllView;
+
+              return (
+                <div
+                  key={col.status}
+                  onDragOver={e => {
+                    if (!allowDrop) return;
+                    e.preventDefault();
+                    if (drag.taskId && drag.overColumn !== col.status) {
+                      setDrag(prev => ({ ...prev, overColumn: col.status }));
+                    }
+                  }}
+                  onDragLeave={e => {
+                    if (!allowDrop) return;
+                    if (!e.currentTarget.contains(e.relatedTarget as Node) && drag.overColumn === col.status) {
+                      setDrag(prev => ({ ...prev, overColumn: null }));
+                    }
+                  }}
+                  onDrop={e => {
+                    if (!allowDrop) return;
+                    e.preventDefault();
+                    handleDragEnd();
+                  }}
+                  className={cn(
+                    'flex flex-col rounded-2xl transition-all duration-200 overflow-hidden',
+                    allowDrop && isDropTarget
+                      ? 'bg-sky-50/50 ring-2 ring-sky-300 ring-dashed'
+                      : 'bg-slate-100/60'
+                  )}
+                >
+                  <div className={cn('px-4 py-3 flex items-center justify-between shrink-0', col.bg)}>
+                    <div className="flex items-center gap-2">
+                      <div className={cn('w-2.5 h-2.5 rounded-full', col.accent)} />
+                      <ColIcon className={cn('w-4 h-4', col.color)} />
+                      <h2 className={cn('font-semibold text-sm', col.color)}>{col.status}</h2>
+                      <span className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-bold',
+                        col.accent, 'text-white'
+                      )}>
+                        {colTasks.length}
+                      </span>
+                    </div>
+                    <button className={cn(
+                      'w-6 h-6 rounded-lg flex items-center justify-center transition-colors',
+                      'text-slate-400 hover:text-slate-600 hover:bg-white/60'
+                    )}>
+                      <MoreHorizontal className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                    {colTasks.map(task => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={() => setDrag(prev => prev.taskId === task.id ? prev : { ...prev, overColumn: col.status })}
+                        isDragging={drag.taskId === task.id}
+                        isOverColumn={drag.overColumn === col.status && drag.taskId !== task.id}
+                        getNurse={getNurse}
+                        onAccept={handleAcceptTask}
+                        onApplyAdjust={(t) => setAdjustTask(t)}
+                        onHandover={handleHandover}
+                        viewMode={viewMode}
+                        showHandoverButton={false}
+                      />
+                    ))}
+
+                    {colTasks.length === 0 && (
+                      <div className="h-32 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl mx-1">
+                        {allowDrop && isDropTarget ? (
+                          <>
+                            <CheckCircle2 className="w-6 h-6 text-sky-400 mb-1" />
+                            <span className="text-xs text-sky-500 font-medium">松开放置</span>
+                          </>
+                        ) : (
+                          <>
+                            <ListTodo className="w-6 h-6 mb-1" />
+                            <span className="text-xs">暂无任务</span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {col.status === '待执行' && isAllView && (
+                    <div className="p-3 pt-0 shrink-0">
+                      <button className="w-full py-2 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 text-sm font-medium hover:border-sky-400 hover:text-sky-500 hover:bg-white/50 transition-colors flex items-center justify-center gap-1.5">
+                        <ListTodo className="w-4 h-4" />
+                        新建任务
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 调整任务弹窗 */}
       {adjustTask && (
@@ -807,6 +1162,18 @@ export default function Tasks() {
           onClose={() => setAdjustTask(null)}
           onCancel={() => setAdjustTask(null)}
           onSubmit={(reason) => handleApplyAdjust(adjustTask, reason)}
+        />
+      )}
+
+      {/* 交接任务弹窗 */}
+      {handoverTaskState && (
+        <HandoverDialog
+          task={handoverTaskState}
+          fromNurse={getNurse(handoverTaskState.assigneeId)}
+          nurses={nurses}
+          onClose={() => setHandoverTaskState(null)}
+          onCancel={() => setHandoverTaskState(null)}
+          onSubmit={(toNurseId, note) => handleSubmitHandover(handoverTaskState, toNurseId, note)}
         />
       )}
     </div>
@@ -918,6 +1285,203 @@ function AdjustTaskDialog({
             >
               <AlertCircle className="w-4 h-4" />
               提交申请
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function HandoverDialog({
+  task,
+  fromNurse,
+  nurses,
+  onClose,
+  onCancel,
+  onSubmit,
+}: {
+  task: CareTask;
+  fromNurse?: Nurse;
+  nurses: Nurse[];
+  onClose: () => void;
+  onCancel: () => void;
+  onSubmit: (toNurseId: string, note: string) => void;
+}) {
+  const [toNurseId, setToNurseId] = useState('');
+  const [note, setNote] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 注释：交接接收人后续将接后端登录，当前是前端模拟选择
+  const availableNurses = nurses.filter(n => n.id !== fromNurse?.id);
+
+  useEffect(() => {
+    if (availableNurses.length > 0 && !toNurseId) {
+      setToNurseId(availableNurses[0].id);
+    }
+  }, [availableNurses, toNurseId]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (toNurseId && note.trim()) {
+      onSubmit(toNurseId, note.trim());
+    }
+  };
+
+  const selectedToNurse = nurses.find(n => n.id === toNurseId);
+  const canSubmit = toNurseId && note.trim();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="px-6 py-4 bg-gradient-to-r from-violet-500 to-purple-600 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ArrowRightLeft className="w-5 h-5 text-white" />
+            <h2 className="text-lg font-bold text-white">任务交接</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="p-6 space-y-4">
+            <div className="bg-violet-50 rounded-xl p-4 space-y-3 border border-violet-100">
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">任务名称</span>
+                <span className="text-sm font-medium text-slate-800">{task.taskName}</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">服务客户</span>
+                <span className="text-sm text-slate-700">
+                  {task.customerName} · {task.roomNumber}室
+                </span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">任务状态</span>
+                <span className="text-sm text-slate-700">{task.status}</span>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-xs text-slate-500 w-16 shrink-0 pt-0.5">交接人</span>
+                <span className="text-sm text-slate-700">
+                  {fromNurse ? (
+                    <span className="flex items-center gap-2">
+                      <Avatar name={fromNurse.name} />
+                      {fromNurse.name}
+                    </span>
+                  ) : (
+                    '待分配'
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                接收人 <span className="text-red-500">*</span>
+              </label>
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowDropdown(!showDropdown)}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm text-left focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 bg-white flex items-center justify-between"
+                >
+                  {selectedToNurse ? (
+                    <span className="flex items-center gap-2">
+                      <Avatar name={selectedToNurse.name} />
+                      <span>
+                        <span className="font-medium text-slate-800">{selectedToNurse.name}</span>
+                        <span className="text-slate-500 ml-1">· {selectedToNurse.nurseLevel}</span>
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">请选择接收人</span>
+                  )}
+                  <ChevronDown className={cn(
+                    'w-4 h-4 text-slate-400 transition-transform',
+                    showDropdown && 'rotate-180'
+                  )} />
+                </button>
+                {showDropdown && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                    {availableNurses.map(nurse => (
+                      <button
+                        key={nurse.id}
+                        type="button"
+                        onClick={() => {
+                          setToNurseId(nurse.id);
+                          setShowDropdown(false);
+                        }}
+                        className={cn(
+                          'w-full px-4 py-2.5 flex items-center gap-2 text-left hover:bg-violet-50 transition-colors',
+                          toNurseId === nurse.id && 'bg-violet-50'
+                        )}
+                      >
+                        <Avatar name={nurse.name} />
+                        <span>
+                          <span className="font-medium text-slate-800">{nurse.name}</span>
+                          <span className="text-slate-500 ml-1 text-xs">· {nurse.nurseLevel}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                交接备注 <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="请详细说明任务交接的注意事项、当前进度等信息..."
+                rows={4}
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 resize-none"
+                required
+              />
+              {!note.trim() && (
+                <p className="mt-1.5 text-[11px] text-slate-400">请填写交接备注后再提交</p>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 hover:border-slate-300 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className={cn(
+                'px-5 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm transition-all flex items-center gap-1.5',
+                canSubmit
+                  ? 'bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-violet-500/25'
+                  : 'bg-slate-300 cursor-not-allowed shadow-none'
+              )}
+            >
+              <ArrowRightLeft className="w-4 h-4" />
+              确认交接
             </button>
           </div>
         </form>

@@ -10,6 +10,9 @@ import {
 } from 'recharts';
 import type { JSX } from 'react';
 import { useAppStore } from '../store';
+import RoomDetailModal from '../components/RoomDetailModal';
+import RoomListModal from '../components/RoomListModal';
+import type { Room } from '../types';
 
 type RoomStatus = 'idle' | 'occupied' | 'cleaning' | 'maintenance';
 
@@ -45,6 +48,7 @@ interface KpiCard {
   icon: React.ComponentType<{ className?: string }>;
   gradient: string;
   iconBg: string;
+  clickable?: boolean;
 }
 
 type NotificationType = 'warning' | 'success' | 'info' | 'danger' | 'care';
@@ -177,12 +181,13 @@ function timeAgo(dateStr: string): string {
   return `${days}天前`;
 }
 
-function KpiCardComponent({ card, delay }: { card: KpiCard; delay: number }): JSX.Element {
+function KpiCardComponent({ card, delay, onClick }: { card: KpiCard; delay: number; onClick?: () => void }): JSX.Element {
   const Icon = card.icon;
   return (
     <div
-      className="relative overflow-hidden rounded-2xl p-5 text-white shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl animate-card-fade-in cursor-pointer"
+      className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-lg transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl animate-card-fade-in ${card.clickable ? 'cursor-pointer' : ''}`}
       style={{ animationDelay: `${delay}ms` }}
+      onClick={card.clickable ? onClick : undefined}
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${card.gradient}`} />
       <div className="relative z-10">
@@ -214,13 +219,24 @@ function KpiCardComponent({ card, delay }: { card: KpiCard; delay: number }): JS
   );
 }
 
-function FloorHeatMap(): JSX.Element {
+interface FloorHeatMapProps {
+  onRoomClick: (room: Room) => void;
+}
+
+function FloorHeatMap({ onRoomClick }: FloorHeatMapProps): JSX.Element {
   const [activeFloor, setActiveFloor] = useState<number>(3);
   const floors = [3, 4, 5, 6];
   const rooms = useAppStore(state => state.rooms);
 
   const floorLayout = useMemo(() => generateFloorLayout(rooms), [rooms]);
   const currentFloor = floorLayout[activeFloor];
+
+  const handleRoomClick = (floorRoom: FloorRoom) => {
+    const room = rooms.find(r => r.id === floorRoom.id);
+    if (room) {
+      onRoomClick(room);
+    }
+  };
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow-lg transition-all duration-300 hover:shadow-xl">
@@ -281,7 +297,7 @@ function FloorHeatMap(): JSX.Element {
           </defs>
 
           {currentFloor.rooms.map((room) => (
-            <g key={room.id} filter="url(#roomShadow)">
+            <g key={room.id} filter="url(#roomShadow)" onClick={() => handleRoomClick(room)} className="cursor-pointer">
               <rect
                 x={room.x}
                 y={room.y}
@@ -290,7 +306,7 @@ function FloorHeatMap(): JSX.Element {
                 rx={8}
                 ry={8}
                 fill={roomStatusColors[room.status]}
-                className="transition-all duration-300 cursor-pointer hover:opacity-80"
+                className="transition-all duration-300 hover:opacity-80"
                 stroke="white"
                 strokeWidth={2}
               />
@@ -571,11 +587,19 @@ function MiniCharts(): JSX.Element {
 }
 
 export default function Dashboard(): JSX.Element {
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [showRoomListModal, setShowRoomListModal] = useState<'occupancy' | 'inHouse' | null>(null);
   const rooms = useAppStore(state => state.rooms);
   const customers = useAppStore(state => state.customers);
   const careTasks = useAppStore(state => state.careTasks);
   const inventoryItems = useAppStore(state => state.inventoryItems);
   const carePlans = useAppStore(state => state.carePlans);
+
+  const handleRoomClick = (room: Room) => {
+    if (room.status === '已入住') {
+      setSelectedRoom(room);
+    }
+  };
 
   const kpiCards = useMemo<KpiCard[]>(() => {
     const totalRooms = rooms.length;
@@ -600,6 +624,7 @@ export default function Dashboard(): JSX.Element {
         icon: BedDouble,
         gradient: 'from-primary-500 to-rose-400',
         iconBg: 'bg-white/20',
+        clickable: true,
       },
       {
         title: '在住客户',
@@ -609,6 +634,7 @@ export default function Dashboard(): JSX.Element {
         icon: Users,
         gradient: 'from-accent-500 to-cyan-400',
         iconBg: 'bg-white/20',
+        clickable: true,
       },
       {
         title: '今日任务数',
@@ -665,13 +691,24 @@ export default function Dashboard(): JSX.Element {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {kpiCards.map((card, index) => (
-            <KpiCardComponent key={card.title} card={card} delay={index * 80} />
+            <KpiCardComponent
+              key={card.title}
+              card={card}
+              delay={index * 80}
+              onClick={() => {
+                if (card.title === '入住率') {
+                  setShowRoomListModal('occupancy');
+                } else if (card.title === '在住客户') {
+                  setShowRoomListModal('inHouse');
+                }
+              }}
+            />
           ))}
         </div>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           <div className="xl:col-span-2">
-            <FloorHeatMap />
+            <FloorHeatMap onRoomClick={handleRoomClick} />
           </div>
           <div className="xl:col-span-1">
             <NotificationList />
@@ -680,6 +717,21 @@ export default function Dashboard(): JSX.Element {
 
         <MiniCharts />
       </div>
+
+      {selectedRoom && (
+        <RoomDetailModal
+          room={selectedRoom}
+          onClose={() => setSelectedRoom(null)}
+        />
+      )}
+
+      {showRoomListModal && (
+        <RoomListModal
+          title={showRoomListModal === 'occupancy' ? '入住率详情 - 所有房间' : '在住客户 - 占用房间列表'}
+          onClose={() => setShowRoomListModal(null)}
+          showAllRooms={true}
+        />
+      )}
     </div>
   );
 }

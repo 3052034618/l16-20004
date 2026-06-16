@@ -25,10 +25,10 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
-  ArrowRight,
   Package,
+  UserCheck,
 } from 'lucide-react';
-import type { Equipment, MaintenanceWorkOrder, WorkOrderPriority, WorkOrderStatus, SparePart } from '@/types';
+import type { Equipment, MaintenanceWorkOrder, WorkOrderPriority, SparePart, Nurse } from '@/types';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
@@ -73,15 +73,6 @@ const priorityColors: Record<WorkOrderPriority, string> = {
   '中': 'bg-amber-100 text-amber-700 border-amber-200',
   '低': 'bg-slate-100 text-slate-600 border-slate-200',
 };
-
-function formatDateTime(date: Date): string {
-  const y = date.getFullYear();
-  const m = (date.getMonth() + 1).toString().padStart(2, '0');
-  const d = date.getDate().toString().padStart(2, '0');
-  const h = date.getHours().toString().padStart(2, '0');
-  const min = date.getMinutes().toString().padStart(2, '0');
-  return `${y}-${m}-${d} ${h}:${min}:00`;
-}
 
 function TabButton({
   active,
@@ -394,6 +385,239 @@ function EquipmentLedger() {
   );
 }
 
+function AssignDialog({
+  open,
+  onClose,
+  order,
+  nurses,
+  equipment,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  order: MaintenanceWorkOrder | null;
+  nurses: Nurse[];
+  equipment: Equipment[];
+  onSubmit: (data: { assigneeId: string; assigneeName: string; estimatedDuration: number; remark: string }) => void;
+}) {
+  const [selectedEngineer, setSelectedEngineer] = useState<string>('');
+  const [estimatedHours, setEstimatedHours] = useState<number>(2);
+  const [remark, setRemark] = useState<string>('');
+  const [engineerDropdownOpen, setEngineerDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setSelectedEngineer('');
+      setEstimatedHours(2);
+      setRemark('');
+      setEngineerDropdownOpen(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setEngineerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  if (!open || !order) return null;
+
+  const selectedNurse = nurses.find((n) => n.id === selectedEngineer);
+  const orderEquipment = equipment.find((e) => e.id === order.equipmentId);
+  const canSubmit = selectedEngineer && estimatedHours > 0;
+
+  const handleSubmit = () => {
+    if (!canSubmit || !selectedNurse) return;
+    onSubmit({
+      assigneeId: selectedEngineer,
+      assigneeName: selectedNurse.name,
+      estimatedDuration: estimatedHours,
+      remark,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+        <div className="px-6 py-4 bg-gradient-to-r from-sky-500 to-blue-500 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-white">
+            <UserCheck className="w-5 h-5" />
+            <h3 className="text-lg font-bold">派工</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-white/80 hover:text-white transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="p-6 max-h-[70vh] overflow-y-auto">
+          <div className="mb-5 bg-slate-50 rounded-xl p-4">
+            <h4 className="text-sm font-semibold text-slate-700 mb-3">工单信息</h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 w-16">设备名:</span>
+                <span className="text-slate-800 font-medium">{order.equipmentName}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 w-16">型号:</span>
+                <span className="text-slate-700 font-mono">{order.equipmentModel}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 w-16">位置:</span>
+                <span className="text-slate-700">{orderEquipment?.location || '-'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 w-16">优先级:</span>
+                <span className={cn(
+                  'px-2 py-0.5 rounded-full text-[10px] font-semibold border',
+                  priorityColors[order.priority]
+                )}>
+                  {order.priority}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 w-16">类型:</span>
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-[11px] font-medium text-slate-700">
+                  <Wrench className="w-3 h-3" />
+                  {order.orderType}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              分配工程师 <span className="text-rose-500">*</span>
+            </label>
+            <div className="relative" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setEngineerDropdownOpen(!engineerDropdownOpen)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border text-left transition-colors',
+                  selectedEngineer
+                    ? 'border-sky-300 bg-sky-50/50'
+                    : 'border-slate-200 hover:border-sky-300'
+                )}
+              >
+                {selectedNurse ? (
+                  <>
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shrink-0">
+                      <span className="text-xs text-white font-bold">
+                        {selectedNurse.name.slice(0, 1)}
+                      </span>
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-slate-800">{selectedNurse.name}</div>
+                      <div className="text-[11px] text-slate-500">{selectedNurse.nurseLevel}</div>
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-slate-400 text-sm">请选择工程师</span>
+                )}
+                <ChevronRight
+                  className={cn(
+                    'w-4 h-4 text-slate-400 shrink-0 transition-transform',
+                    engineerDropdownOpen && 'rotate-90'
+                  )}
+                />
+              </button>
+              {engineerDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 w-full max-h-60 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1">
+                  {nurses.map((nurse) => (
+                    <button
+                      key={nurse.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedEngineer(nurse.id);
+                        setEngineerDropdownOpen(false);
+                      }}
+                      className={cn(
+                        'w-full text-left px-4 py-2.5 transition-colors flex items-center gap-3 hover:bg-slate-50',
+                        selectedEngineer === nurse.id ? 'bg-sky-50' : ''
+                      )}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center shrink-0">
+                        <span className="text-xs text-white font-bold">
+                          {nurse.name.slice(0, 1)}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-slate-800">{nurse.name}</div>
+                        <div className="text-[11px] text-slate-500">{nurse.nurseLevel}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              预计工时（小时） <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="number"
+              min="0.5"
+              step="0.5"
+              value={estimatedHours}
+              onChange={(e) => setEstimatedHours(parseFloat(e.target.value) || 0)}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400"
+              placeholder="请输入预计工时"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              派工备注
+            </label>
+            <textarea
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              rows={3}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 resize-none"
+              placeholder="请输入派工备注（可选）"
+            />
+          </div>
+        </div>
+
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className={cn(
+              'px-5 py-2.5 rounded-xl text-sm font-medium text-white transition-all flex items-center gap-2',
+              canSubmit
+                ? 'bg-gradient-to-r from-sky-500 to-blue-500 hover:shadow-lg hover:shadow-sky-500/25'
+                : 'bg-slate-300 cursor-not-allowed'
+            )}
+          >
+            <UserCheck className="w-4 h-4" />
+            确认派工
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkOrders() {
   const { maintenanceWorkOrders, updateMaintenanceWorkOrder, spareParts, updateSparePart, nurses, equipment } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
@@ -403,6 +627,8 @@ function WorkOrders() {
   const [engineerFilter, setEngineerFilter] = useState<string>('全部');
   const [equipmentDropdownOpen, setEquipmentDropdownOpen] = useState(false);
   const [engineerDropdownOpen, setEngineerDropdownOpen] = useState(false);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<MaintenanceWorkOrder | null>(null);
   const equipmentDropdownRef = useRef<HTMLDivElement>(null);
   const engineerDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -502,19 +728,48 @@ function WorkOrders() {
     updateMaintenanceWorkOrder(orderId, updates);
   };
 
-  const getNextActions = (currentStatus: MaintenanceWorkOrder['status']): { label: string; target: MaintenanceWorkOrder['status']; icon: React.ComponentType<{ className?: string }>; style: string }[] => {
+  const handleAssign = (order: MaintenanceWorkOrder) => {
+    setSelectedOrder(order);
+    setAssignDialogOpen(true);
+  };
+
+  const handleAssignSubmit = (data: { assigneeId: string; assigneeName: string; estimatedDuration: number; remark: string }) => {
+    if (!selectedOrder) return;
+
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = (now.getMonth() + 1).toString().padStart(2, '0');
+    const d = now.getDate().toString().padStart(2, '0');
+    const h = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const startTimeStr = `${y}-${m}-${d} ${h}:${min}:00`;
+
+    const updates: Partial<MaintenanceWorkOrder> = {
+      status: '处理中',
+      assigneeId: data.assigneeId,
+      assigneeName: data.assigneeName,
+      startTime: startTimeStr,
+      estimatedDuration: data.estimatedDuration * 60,
+      remark: data.remark,
+    };
+
+    updateMaintenanceWorkOrder(selectedOrder.id, updates);
+    setSelectedOrder(null);
+  };
+
+  const getNextActions = (currentStatus: MaintenanceWorkOrder['status']): { label: string; action: 'assign' | 'complete'; icon: React.ComponentType<{ className?: string }>; style: string }[] => {
     switch (currentStatus) {
       case '待处理':
         return [
-          { label: '开始处理', target: '处理中', icon: ArrowRight, style: 'bg-sky-500 text-white hover:bg-sky-600' },
+          { label: '派工', action: 'assign', icon: UserCheck, style: 'bg-gradient-to-r from-sky-500 to-blue-500 text-white hover:shadow-lg hover:shadow-sky-500/25' },
         ];
       case '处理中':
         return [
-          { label: '完成工单', target: '已完成', icon: CheckCircle2, style: 'bg-emerald-500 text-white hover:bg-emerald-600' },
+          { label: '完成工单', action: 'complete', icon: CheckCircle2, style: 'bg-emerald-500 text-white hover:bg-emerald-600' },
         ];
       case '已延期':
         return [
-          { label: '开始处理', target: '处理中', icon: ArrowRight, style: 'bg-sky-500 text-white hover:bg-sky-600' },
+          { label: '派工', action: 'assign', icon: UserCheck, style: 'bg-gradient-to-r from-sky-500 to-blue-500 text-white hover:shadow-lg hover:shadow-sky-500/25' },
         ];
       default:
         return [];
@@ -881,7 +1136,13 @@ function WorkOrders() {
                           return (
                             <button
                               key={idx}
-                              onClick={() => handleStatusChange(wo.id, action.target)}
+                              onClick={() => {
+                                if (action.action === 'assign') {
+                                  handleAssign(wo);
+                                } else if (action.action === 'complete') {
+                                  handleStatusChange(wo.id, '已完成');
+                                }
+                              }}
                               className={cn(
                                 'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm',
                                 action.style
@@ -904,6 +1165,18 @@ function WorkOrders() {
           </table>
         </div>
       </div>
+
+      <AssignDialog
+        open={assignDialogOpen}
+        onClose={() => {
+          setAssignDialogOpen(false);
+          setSelectedOrder(null);
+        }}
+        order={selectedOrder}
+        nurses={nurses}
+        equipment={equipment}
+        onSubmit={handleAssignSubmit}
+      />
     </div>
   );
 }

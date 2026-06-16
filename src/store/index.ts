@@ -13,6 +13,7 @@ import type {
   MaintenanceWorkOrder,
   Room,
   SparePart,
+  TaskHandoverRecord,
 } from '@/types';
 import {
   customers as initialCustomers,
@@ -42,6 +43,7 @@ interface AppState {
   maintenanceWorkOrders: MaintenanceWorkOrder[];
   spareParts: SparePart[];
   rooms: Room[];
+  taskHandoverRecords: TaskHandoverRecord[];
 
   addCustomer: (customer: Customer) => void;
   updateCustomer: (id: string, data: Partial<Customer>) => void;
@@ -58,6 +60,10 @@ interface AppState {
   addCareTask: (task: CareTask) => void;
   updateCareTask: (id: string, data: Partial<CareTask>) => void;
   deleteCareTask: (id: string) => void;
+  handoverTask: (handover: Omit<TaskHandoverRecord, 'id' | 'handoverTime'> & { carePlanId?: string }) => void;
+  addTaskHandoverRecord: (record: TaskHandoverRecord) => void;
+  updateTaskHandoverRecord: (id: string, data: Partial<TaskHandoverRecord>) => void;
+  deleteTaskHandoverRecord: (id: string) => void;
 
   addScheduleEntry: (entry: ScheduleEntry) => void;
   updateScheduleEntry: (id: string, data: Partial<ScheduleEntry>) => void;
@@ -94,7 +100,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       customers: initialCustomers,
       nurses: initialNurses,
       carePlans: initialCarePlans,
@@ -107,6 +113,7 @@ export const useAppStore = create<AppState>()(
       maintenanceWorkOrders: initialMaintenanceWorkOrders,
       spareParts: initialSpareParts,
       rooms: initialRooms,
+      taskHandoverRecords: [],
 
       addCustomer: (customer) => set((state) => ({ customers: [...state.customers, customer] })),
       updateCustomer: (id, data) => set((state) => ({
@@ -138,6 +145,77 @@ export const useAppStore = create<AppState>()(
       })),
       deleteCareTask: (id) => set((state) => ({
         careTasks: state.careTasks.filter((t) => t.id !== id),
+      })),
+      handoverTask: (handover) => {
+        const now = new Date().toISOString();
+        const newHandoverId = `hov_${Date.now()}`;
+        set((state) => {
+          // 1. 更新任务的交接字段
+          const updatedTasks = state.careTasks.map((t) =>
+            t.id === handover.taskId
+              ? {
+                  ...t,
+                  isHandover: true,
+                  handoverFromId: handover.fromNurseId,
+                  handoverFromName: handover.fromNurseName,
+                  handoverToId: handover.toNurseId,
+                  handoverToName: handover.toNurseName,
+                  handoverNote: handover.note,
+                  handoverTime: now,
+                  assigneeId: handover.toNurseId,
+                  assigneeName: handover.toNurseName,
+                }
+              : t
+          );
+
+          // 2. 添加交接记录
+          const newRecord: TaskHandoverRecord = {
+            ...handover,
+            id: newHandoverId,
+            handoverTime: now,
+          };
+
+          // 3. 添加到护理方案审批历史（如果有关联方案）
+          const updatedCarePlans = state.carePlans.map((p) =>
+            p.id === handover.carePlanId
+              ? {
+                  ...p,
+                  approvalHistory: [
+                    ...(p.approvalHistory || []),
+                    {
+                      id: `appr_${Date.now()}`,
+                      operatorId: handover.fromNurseId,
+                      operatorName: handover.fromNurseName,
+                      action: '任务交接',
+                      comment: `【任务：${handover.taskName}】交接给 ${handover.toNurseName}，交接备注：${handover.note}`,
+                      operateTime: now,
+                      taskId: handover.taskId,
+                      taskName: handover.taskName,
+                      taskStatus: handover.taskStatusAfter,
+                      carePlanId: handover.carePlanId,
+                    },
+                  ],
+                }
+              : p
+          );
+
+          return {
+            careTasks: updatedTasks,
+            taskHandoverRecords: [...state.taskHandoverRecords, newRecord],
+            carePlans: updatedCarePlans,
+          };
+        });
+      },
+      addTaskHandoverRecord: (record) => set((state) => ({
+        taskHandoverRecords: [...state.taskHandoverRecords, record],
+      })),
+      updateTaskHandoverRecord: (id, data) => set((state) => ({
+        taskHandoverRecords: state.taskHandoverRecords.map((r) =>
+          r.id === id ? { ...r, ...data } : r
+        ),
+      })),
+      deleteTaskHandoverRecord: (id) => set((state) => ({
+        taskHandoverRecords: state.taskHandoverRecords.filter((r) => r.id !== id),
       })),
 
       addScheduleEntry: (entry) => set((state) => ({ scheduleEntries: [...state.scheduleEntries, entry] })),

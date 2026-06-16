@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { RoomType } from '../types';
 import { useAppStore } from '../store';
+import RoomListModal from '../components/RoomListModal';
 
 const pinkPalette = [
   '#E91E63', '#EC407A', '#F06292', '#F48FB1',
@@ -43,6 +44,7 @@ export default function Reports() {
   const [selectedRoomType, setSelectedRoomType] = useState<string>('全部');
   const [timeMode, setTimeMode] = useState<'week' | 'month'>('month');
   const [isExporting, setIsExporting] = useState(false);
+  const [showRoomListModal, setShowRoomListModal] = useState<string | null>(null);
 
   const customers = useAppStore(state => state.customers);
   const rooms = useAppStore(state => state.rooms);
@@ -508,9 +510,13 @@ export default function Reports() {
                         dataKey="value"
                         label={({ name, percent }) => `${name} ${percent}%`}
                         labelLine={{ strokeWidth: 1 }}
+                        onClick={(data) => {
+                          setShowRoomListModal(data.name);
+                        }}
+                        style={{ cursor: 'pointer' }}
                       >
                         {roomTypeDistribution.map((_, idx) => (
-                          <Cell key={`cell-${idx}`} fill={pinkPalette[idx % pinkPalette.length]} />
+                          <Cell key={`cell-${idx}`} fill={pinkPalette[idx % pinkPalette.length]} className="transition-opacity hover:opacity-80" />
                         ))}
                       </Pie>
                       <Tooltip
@@ -543,20 +549,24 @@ export default function Reports() {
               </div>
               <div className="space-y-4">
                 {occupancyRateByType.map((item, idx) => (
-                  <div key={item.name} className="space-y-2">
+                  <div
+                    key={item.name}
+                    className="space-y-2 cursor-pointer group"
+                    onClick={() => setShowRoomListModal(item.name)}
+                  >
                     <div className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <span
-                          className="inline-block h-3 w-3 rounded-full"
+                          className="inline-block h-3 w-3 rounded-full transition-transform group-hover:scale-125"
                           style={{ backgroundColor: pinkPalette[idx % pinkPalette.length] }}
                         />
-                        <span className="font-medium text-gray-700">{item.name}</span>
+                        <span className="font-medium text-gray-700 group-hover:text-primary-600 transition-colors">{item.name}</span>
                       </div>
-                      <span className="font-semibold text-gray-800">{item.value}%</span>
+                      <span className="font-semibold text-gray-800 group-hover:text-primary-600 transition-colors">{item.value}%</span>
                     </div>
                     <div className="relative h-6 w-full overflow-hidden rounded-full bg-gray-100">
                       <div
-                        className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out"
+                        className="absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out group-hover:brightness-110"
                         style={{
                           width: `${item.value}%`,
                           background: item.value === 0
@@ -807,6 +817,15 @@ export default function Reports() {
           </div>
         </div>
       </div>
+
+      {showRoomListModal && (
+        <RoomListModal
+          title={`${showRoomListModal} - 房间列表`}
+          onClose={() => setShowRoomListModal(null)}
+          filterRoomType={showRoomListModal}
+          showAllRooms={true}
+        />
+      )}
     </div>
   );
 }

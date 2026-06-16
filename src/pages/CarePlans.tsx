@@ -19,18 +19,23 @@ import {
   Loader2,
   MessageSquare,
   ChevronRight,
+  ChevronDown,
   FileText,
   Star,
   AlertCircle,
   Send,
   Edit3,
   X,
+  Repeat,
+  ArrowRight,
+  Inbox,
 } from 'lucide-react';
-import type { CarePlan, CarePlanStatus, Nurse, CareTask } from '@/types';
+import type { CarePlan, CarePlanStatus, Nurse, CareTask, TaskStatus } from '@/types';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 
 type StatusFilter = CarePlanStatus | '全部';
+type HistoryFilter = '全部记录' | '审批记录' | '任务调整' | '任务交接' | '任务接收';
 
 const statusFilters: { value: StatusFilter; color: string }[] = [
   { value: '全部', color: 'bg-slate-500' },
@@ -47,14 +52,34 @@ const statusBadgeStyles: Record<CarePlanStatus, string> = {
   '已调整': 'bg-sky-100 text-sky-700 border-sky-200',
 };
 
-function getActionStyle(action: string): { icon: typeof CheckCircle2; color: string; bg: string } {
-  const styles: Record<string, { icon: typeof CheckCircle2; color: string; bg: string }> = {
-    '提交': { icon: FileText, color: 'text-slate-600', bg: 'bg-slate-100' },
-    '通过': { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
-    '驳回': { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100' },
-    '调整': { icon: RefreshCw, color: 'text-sky-600', bg: 'bg-sky-100' },
+const taskStatusBadgeStyles: Record<CareTask['status'], string> = {
+  '待执行': 'bg-slate-100 text-slate-700 border-slate-200',
+  '进行中': 'bg-sky-100 text-sky-700 border-sky-200',
+  '已完成': 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  '已超时': 'bg-red-100 text-red-700 border-red-200',
+  '已取消': 'bg-slate-100 text-slate-500 border-slate-200',
+  '调整中': 'bg-amber-100 text-amber-700 border-amber-200',
+};
+
+const historyFilters: { value: HistoryFilter; actions: string[] }[] = [
+  { value: '全部记录', actions: [] },
+  { value: '审批记录', actions: ['提交', '通过', '驳回', '调整'] },
+  { value: '任务调整', actions: ['任务调整申请'] },
+  { value: '任务交接', actions: ['任务交接'] },
+  { value: '任务接收', actions: ['任务接收'] },
+];
+
+function getActionStyle(action: string): { icon: typeof CheckCircle2; color: string; bg: string; dotColor: string } {
+  const styles: Record<string, { icon: typeof CheckCircle2; color: string; bg: string; dotColor: string }> = {
+    '提交': { icon: FileText, color: 'text-slate-600', bg: 'bg-slate-100', dotColor: 'bg-slate-400' },
+    '通过': { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100', dotColor: 'bg-emerald-500' },
+    '驳回': { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', dotColor: 'bg-red-500' },
+    '调整': { icon: RefreshCw, color: 'text-sky-600', bg: 'bg-sky-100', dotColor: 'bg-sky-500' },
+    '任务调整申请': { icon: Edit3, color: 'text-violet-600', bg: 'bg-violet-100', dotColor: 'bg-violet-500' },
+    '任务交接': { icon: Repeat, color: 'text-purple-600', bg: 'bg-purple-100', dotColor: 'bg-purple-500' },
+    '任务接收': { icon: Inbox, color: 'text-fuchsia-600', bg: 'bg-fuchsia-100', dotColor: 'bg-fuchsia-500' },
   };
-  return styles[action] || { icon: RefreshCw, color: 'text-sky-600', bg: 'bg-sky-100' };
+  return styles[action] || { icon: RefreshCw, color: 'text-slate-600', bg: 'bg-slate-100', dotColor: 'bg-slate-400' };
 }
 
 const categoryIcons: Record<CareTask['category'], { icon: typeof Heart; bg: string; text: string }> = {
@@ -333,6 +358,8 @@ export default function CarePlans() {
   const [isAlgLoading, setIsAlgLoading] = useState(false);
   const [approvalComment, setApprovalComment] = useState('');
   const [showHistory, setShowHistory] = useState(true);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('全部记录');
+  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [adjustDialog, setAdjustDialog] = useState<{ open: boolean; taskId: string | null; taskName: string }>({
     open: false,
     taskId: null,
@@ -364,6 +391,15 @@ export default function CarePlans() {
     rejected: carePlans.filter(p => p.status === '已驳回').length,
     adjusting: carePlans.filter(p => p.status === '已调整').length,
   }), [carePlans]);
+
+  const filteredApprovalHistory = useMemo(() => {
+    if (!selectedPlan?.approvalHistory) return [];
+    const filterConfig = historyFilters.find(f => f.value === historyFilter);
+    if (!filterConfig || filterConfig.actions.length === 0) {
+      return selectedPlan.approvalHistory;
+    }
+    return selectedPlan.approvalHistory.filter(r => filterConfig.actions.includes(r.action));
+  }, [selectedPlan?.approvalHistory, historyFilter]);
 
   const runSmartAllocation = () => {
     setIsAlgLoading(true);
@@ -397,14 +433,28 @@ export default function CarePlans() {
     return timeStr.slice(0, 16);
   };
 
-  const parseComment = (comment: string): { taskName?: string; reason: string } => {
-    const match = comment.match(/【任务：(.+?)】/);
-    if (match) {
-      const taskName = match[1];
-      const reason = comment.replace(match[0], '').trim();
-      return { taskName, reason };
+  const parseComment = (comment: string): { taskName?: string; handoverToName?: string; reason: string } => {
+    let result: { taskName?: string; handoverToName?: string; reason: string } = { reason: comment };
+    
+    const taskMatch = comment.match(/【任务：(.+?)】/);
+    if (taskMatch) {
+      result.taskName = taskMatch[1];
+      result.reason = comment.replace(taskMatch[0], '').trim();
     }
-    return { reason: comment };
+    
+    const handoverMatch = result.reason.match(/交接给\s*(\S+?)(?:[，,。]|交接备注)/);
+    if (handoverMatch) {
+      result.handoverToName = handoverMatch[1];
+    }
+    
+    const noteMatch = result.reason.match(/交接备注[：:]\s*(.+)$/);
+    if (noteMatch) {
+      result.reason = noteMatch[1].trim();
+    } else if (handoverMatch) {
+      result.reason = result.reason.replace(/交接给\s*\S+?[，,。]?\s*/, '').trim();
+    }
+    
+    return result;
   };
 
   const handleApprovalAction = (action: '通过' | '驳回' | '调整') => {
@@ -463,22 +513,51 @@ export default function CarePlans() {
   };
 
   const handleTaskAccept = (taskId: string) => {
+    if (!selectedPlan) return;
+    const task = careTasks.find(t => t.id === taskId) || selectedPlan.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    
     updateCareTask(taskId, {
       status: '进行中',
       startTime: formatDateTime(new Date()),
     });
-  };
-
-  const handleTaskAdjustSubmit = (taskId: string, reason: string) => {
-    if (!selectedPlan) return;
+    
     const operateTime = formatDateTime(new Date());
     const newRecord = {
       id: `AH-new-${Date.now()}`,
       operatorId: selectedPlan.assignedNurseIds[0] || 'N001',
       operatorName: getNurse(selectedPlan.assignedNurseIds[0])?.name || '护理师',
-      action: '调整' as const,
-      comment: reason,
+      action: '任务接收',
+      comment: `【任务：${task.taskName}】已确认接收`,
       operateTime,
+      taskId: task.id,
+      taskName: task.taskName,
+      taskStatus: '进行中' as const,
+      carePlanId: selectedPlan.id,
+    };
+    updateCarePlan(selectedPlan.id, {
+      approvalHistory: [...selectedPlan.approvalHistory, newRecord],
+      updateTime: operateTime,
+    });
+  };
+
+  const handleTaskAdjustSubmit = (taskId: string, reason: string) => {
+    if (!selectedPlan) return;
+    const task = careTasks.find(t => t.id === taskId) || selectedPlan.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    
+    const operateTime = formatDateTime(new Date());
+    const newRecord = {
+      id: `AH-new-${Date.now()}`,
+      operatorId: selectedPlan.assignedNurseIds[0] || 'N001',
+      operatorName: getNurse(selectedPlan.assignedNurseIds[0])?.name || '护理师',
+      action: '任务调整申请',
+      comment: `【任务：${task.taskName}】${reason}`,
+      operateTime,
+      taskId: task.id,
+      taskName: task.taskName,
+      taskStatus: '调整中' as const,
+      carePlanId: selectedPlan.id,
     };
     updateCarePlan(selectedPlan.id, {
       status: '已调整',
@@ -861,64 +940,181 @@ export default function CarePlans() {
 
                   {showHistory && (
                     <div className="pt-5 border-t border-slate-100">
-                      <h4 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-1.5">
-                        <Clock className="w-4 h-4 text-slate-400" />
-                        审批历史时间轴
-                      </h4>
-                      {(!selectedPlan.approvalHistory || selectedPlan.approvalHistory.length === 0) ? (
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                          <Clock className="w-4 h-4 text-slate-400" />
+                          审批历史时间轴
+                        </h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {historyFilters.map(f => (
+                            <button
+                              key={f.value}
+                              onClick={() => setHistoryFilter(f.value)}
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[11px] font-medium border transition-all',
+                                historyFilter === f.value
+                                  ? 'bg-pink-500 text-white border-transparent shadow-sm'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:border-pink-300'
+                              )}
+                            >
+                              {f.value}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {(!filteredApprovalHistory || filteredApprovalHistory.length === 0) ? (
                         <div className="py-12 text-center text-slate-400">
                           <FileText className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                          <div className="text-sm">暂无审批记录</div>
+                          <div className="text-sm">暂无{historyFilter === '全部记录' ? '' : historyFilter}记录</div>
                         </div>
                       ) : (
                         <div className="relative ml-3">
                           <div className="absolute left-2 top-1 bottom-1 w-0.5 bg-gradient-to-b from-pink-300 via-slate-200 to-emerald-300" />
-                          {selectedPlan.approvalHistory.map((record, idx) => {
+                          {filteredApprovalHistory.map((record, idx) => {
                             const style = getActionStyle(record.action);
                             const ActIcon = style.icon;
-                            const isLast = idx === selectedPlan.approvalHistory!.length - 1;
+                            const isLast = idx === filteredApprovalHistory!.length - 1;
+                            const isExpanded = expandedRecordId === record.id;
                             const parsedComment = record.comment ? parseComment(record.comment) : null;
-                            const isNurse = record.operatorName === '护理师';
+                            const isNurse = nurses.some(n => n.name === record.operatorName) || record.operatorName.includes('护理师');
+                            
+                            const displayTaskName = record.taskName || parsedComment?.taskName;
+                            const displayTaskId = record.taskId;
+                            const liveTask = displayTaskId ? careTasks.find(t => t.id === displayTaskId) : null;
+                            const displayTaskStatus = liveTask?.status || record.taskStatus;
+                            
                             return (
                               <div key={record.id} className="relative pl-10 pb-5 last:pb-0">
                                 <div className={cn(
-                                  'absolute left-0 w-5 h-5 rounded-full flex items-center justify-center ring-4 ring-white',
+                                  'absolute left-0 w-5 h-5 rounded-full flex items-center justify-center ring-4 ring-white z-10',
                                   style.bg,
                                   isLast && 'ring-pink-100 scale-110'
                                 )}>
                                   <ActIcon className={cn('w-3 h-3', style.color)} />
                                 </div>
-                                <div className={cn(
-                                  'rounded-xl p-4 transition-all',
-                                  isLast ? 'bg-gradient-to-br from-pink-50/80 to-white border border-pink-100' : 'bg-slate-50 border border-slate-100'
-                                )}>
+                                <div
+                                  onClick={() => setExpandedRecordId(isExpanded ? null : record.id)}
+                                  className={cn(
+                                    'rounded-xl p-4 transition-all cursor-pointer hover:shadow-md',
+                                    isLast ? 'bg-gradient-to-br from-pink-50/80 to-white border border-pink-100' : 'bg-slate-50 border border-slate-100 hover:border-pink-200'
+                                  )}
+                                >
                                   <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <span className={cn('text-xs font-bold px-2 py-0.5 rounded-md', style.bg, style.color)}>
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <span className={cn('text-xs font-bold px-2 py-0.5 rounded-md shrink-0', style.bg, style.color)}>
                                         {record.action}
                                       </span>
-                                      <span className="text-sm font-medium text-slate-700 flex items-center gap-1">
-                                        {isNurse && <Stethoscope className="w-3.5 h-3.5 text-pink-500" />}
-                                        {record.operatorName}
+                                      <span className="text-sm font-medium text-slate-700 flex items-center gap-1 min-w-0">
+                                        {isNurse && <Stethoscope className="w-3.5 h-3.5 text-pink-500 shrink-0" />}
+                                        <span className="truncate">{record.operatorName}</span>
                                       </span>
+                                      {displayTaskStatus && (
+                                        <span className={cn(
+                                          'px-1.5 py-0.5 rounded-full text-[10px] font-medium border shrink-0 ml-auto',
+                                          taskStatusBadgeStyles[displayTaskStatus]
+                                        )}>
+                                          {displayTaskStatus}
+                                        </span>
+                                      )}
                                     </div>
-                                    <span className="text-xs text-slate-400">{formatTimeToMinute(record.operateTime)}</span>
+                                    <div className="flex items-center gap-2 ml-2 shrink-0">
+                                      <span className="text-xs text-slate-400">{formatTimeToMinute(record.operateTime)}</span>
+                                      {isExpanded ? (
+                                        <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                                      ) : (
+                                        <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                                      )}
+                                    </div>
                                   </div>
-                                  {parsedComment && (
-                                    <div className="mt-2">
-                                      {parsedComment.taskName && (
-                                        <div className="mb-2">
-                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium">
-                                            <ClipboardList className="w-3 h-3" />
-                                            任务：{parsedComment.taskName}
-                                          </span>
+                                  
+                                  {isExpanded && (
+                                    <div className="mt-4 pt-4 border-t border-slate-200/60 space-y-3">
+                                      {displayTaskName && (
+                                        <div className="flex items-start gap-2">
+                                          <div className="w-6 h-6 rounded-md bg-amber-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <ClipboardList className="w-3.5 h-3.5 text-amber-600" />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="text-[11px] text-slate-400 mb-0.5">关联任务</div>
+                                            <div className="text-sm font-medium text-slate-700 truncate">{displayTaskName}</div>
+                                          </div>
                                         </div>
                                       )}
-                                      {parsedComment.reason && (
-                                        <p className="text-sm text-slate-600 leading-relaxed">
-                                          {parsedComment.reason}
-                                        </p>
+                                      
+                                      <div className="flex items-start gap-2">
+                                        <div className="w-6 h-6 rounded-md bg-pink-100 flex items-center justify-center shrink-0 mt-0.5">
+                                          {isNurse ? (
+                                            <Avatar name={record.operatorName} size="sm" />
+                                          ) : (
+                                            <User className="w-3.5 h-3.5 text-pink-600" />
+                                          )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-[11px] text-slate-400 mb-0.5">处理人</div>
+                                          <div className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                                            {isNurse && <Stethoscope className="w-3 h-3 text-pink-500" />}
+                                            {record.operatorName}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      
+                                      {(parsedComment?.reason || record.comment) && (
+                                        <div className="flex items-start gap-2">
+                                          <div className="w-6 h-6 rounded-md bg-sky-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <MessageSquare className="w-3.5 h-3.5 text-sky-600" />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="text-[11px] text-slate-400 mb-0.5">
+                                              {record.action.includes('审批') || record.action === '通过' || record.action === '驳回' ? '审批意见' : '原因'}
+                                            </div>
+                                            <div className="text-sm text-slate-600 leading-relaxed">
+                                              {parsedComment?.reason || record.comment}
+                                            </div>
+                                          </div>
+                                        </div>
                                       )}
+                                      
+                                      {parsedComment?.handoverToName && (
+                                        <div className="flex items-start gap-2">
+                                          <div className="w-6 h-6 rounded-md bg-purple-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <ArrowRight className="w-3.5 h-3.5 text-purple-600" />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="text-[11px] text-slate-400 mb-0.5">交接给</div>
+                                            <div className="text-sm font-medium text-purple-700 flex items-center gap-1">
+                                              <Stethoscope className="w-3 h-3 text-purple-500" />
+                                              {parsedComment.handoverToName}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                      {displayTaskStatus && (
+                                        <div className="flex items-start gap-2">
+                                          <div className="w-6 h-6 rounded-md bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="text-[11px] text-slate-400 mb-0.5">当前任务状态</div>
+                                            <span className={cn(
+                                              'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border',
+                                              taskStatusBadgeStyles[displayTaskStatus]
+                                            )}>
+                                              {displayTaskStatus}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                      <div className="flex items-start gap-2">
+                                        <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                                          <Calendar className="w-3.5 h-3.5 text-slate-600" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-[11px] text-slate-400 mb-0.5">操作时间</div>
+                                          <div className="text-sm text-slate-600">{record.operateTime}</div>
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
